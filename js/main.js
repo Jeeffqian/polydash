@@ -8,8 +8,18 @@ import { formatTime, show, hide, toast, getBest, setBest, medalFor, MEDAL_ICON, 
 
 const $ = (id) => document.getElementById(id);
 
+let lastDef = null;
+// true while test-driving a track built in the editor (ESC goes back to it)
+let editing = false;
+// set when the in-race ESC handler already dealt with this keypress
+let escHandled = false;
+
 const game = new Game($('game-canvas'), {
-  onEscape: () => toMenu(),
+  onEscape: () => {
+    escHandled = true;
+    if (editing) backToEditor();
+    else toMenu();
+  },
   onFinish: (result) => showFinish(result),
 });
 
@@ -22,8 +32,6 @@ function customTrackId(points) {
   }
   return `custom_${(h >>> 0).toString(36)}`;
 }
-
-let lastDef = null;
 
 // ------------------------------------------------------------ navigation
 
@@ -44,11 +52,23 @@ function toTrackSelect() {
 }
 
 function startTrack(def) {
+  if (!def) { toast('That track could not be loaded.'); return; }
+  if (!game.startTrack(def)) { toast('That track could not be built — rebuild it in the editor.'); return; }
+  editing = false;
   hideAllOverlays();
   show($('hud'));
   $('hud-splits').innerHTML = '';
   lastDef = def;
-  game.startTrack(def);
+}
+
+/** Leave a test drive and go back to the editor with the layout intact. */
+function backToEditor() {
+  editing = false;
+  hide($('hud'));
+  hide($('finish'));
+  hideAllOverlays();
+  show($('editor'));
+  editor.draw();
 }
 
 // ------------------------------------------------------------ track grid
@@ -78,10 +98,13 @@ function buildTrackGrid() {
     card.addEventListener('click', (e) => {
       if (e.target.closest('.lb-btn')) return;
       const id = card.dataset.track;
-      if (id === 'custom') {
+      // custom tracks carry a hashed id (custom_xxxx), so match the prefix
+      if (id.startsWith('custom')) {
         const pts = loadCustomPoints();
         if (!pts) { toast('No custom track yet — build one in the editor!'); return; }
-        startTrack(customDef(pts));
+        const def = customDef(pts);
+        if (!def) { toast('That custom track is too small or broken — rebuild it in the editor.'); return; }
+        startTrack(def);
       } else {
         startTrack(TRACKS.find(t => t.id === id));
       }
@@ -104,15 +127,46 @@ function loadCustomPoints() {
   } catch (e) { return null; }
 }
 
+// The editor stores points as {x, z}, but test-drive used to hand us raw
+// [x, y, z] triples — reading .x/.z off those produced NaN and an invisible
+// track. Accept both shapes and drop anything that is not a finite number.
+function normalizeCustomPoints(pts) {
+  if (!Array.isArray(pts)) return [];
+  const out = [];
+  for (const p of pts) {
+    let x, z;
+    if (Array.isArray(p)) {
+      x = Number(p[0]);
+      z = Number(p.length > 2 ? p[2] : p[1]);
+    } else if (p && typeof p === 'object') {
+      x = Number(p.x);
+      z = Number(p.z);
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
+    const prev = out[out.length - 1];
+    if (prev && Math.hypot(x - prev.x, z - prev.z) < 1) continue; // duplicate
+    out.push({ x, z });
+  }
+  // drop a trailing point sitting on top of the first one
+  if (out.length > 1) {
+    const a = out[0], b = out[out.length - 1];
+    if (Math.hypot(a.x - b.x, a.z - b.z) < 1) out.pop();
+  }
+  return out;
+}
+
 function customDef(pts) {
-  const world = pts.map(p => [p.x, 0, p.z]);
+  const clean = normalizeCustomPoints(pts);
+  if (clean.length < 4) return null;
+  const world = clean.map(p => [p.x, 0, p.z]);
   // rough length from the polygon through the points (curve is a bit longer)
   let len = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[i], b = pts[(i + 1) % pts.length];
+  for (let i = 0; i < clean.length; i++) {
+    const a = clean[i], b = clean[(i + 1) % clean.length];
     len += Math.hypot(b.x - a.x, b.z - a.z);
   }
   len *= 1.08;
+  if (!Number.isFinite(len) || len < 24) return null;
   return {
     id: customTrackId(world),
     name: 'Custom Track',
@@ -190,6 +244,7 @@ function showFinish(result) {
   }
 
   const medal = medalFor(result.timeMs, result.medals);
+  $('btn-to-menu').textContent = editing ? 'BACK TO EDITOR' : 'TRACKS';
   $('finish-medal').textContent = medal ? MEDAL_ICON[medal] : '🏁';
   $('finish-time').textContent = formatTime(result.timeMs);
 
@@ -240,14 +295,25 @@ async function doSubmit() {
 // ------------------------------------------------------------ editor wiring
 
 const editor = new TrackEditor((points) => {
-  // test drive
+  // test drive — keep the editor open behind us so ESC returns to it
+  const def = customDef(points);
+  if (!def) {
+    $('editor-hint').textContent = 'That layout is too small to drive — spread the corners out and try again.';
+    return;
+  }
+  editing = true;
   hide($('editor'));
   show($('hud'));
   $('hud-splits').innerHTML = '';
-  lastDef = customDef(points);
-  game.startTrack(lastDef);
+  lastDef = def;
+  if (!game.startTrack(def)) {
+    editing = false;
+    hide($('hud'));
+    show($('editor'));
+    $('editor-hint').textContent = 'That layout could not be built — try spreading the corners out a bit.';
+  }
 });
-editor.onExit = () => toMenu();
+editor.onExit = () => { editing = false; toMenu(); };
 
 // ------------------------------------------------------------ buttons & keys
 
@@ -266,7 +332,8 @@ $('btn-retry').addEventListener('click', () => {
 });
 $('btn-to-menu').addEventListener('click', () => {
   hide($('finish'));
-  toTrackSelect();
+  if (editing) backToEditor();
+  else toTrackSelect();
 });
 $('btn-submit-score').addEventListener('click', doSubmit);
 $('player-name').addEventListener('keydown', (e) => {
@@ -276,6 +343,7 @@ $('player-name').addEventListener('keydown', (e) => {
 // ESC while overlays open (when game state is 'menu' the game won't handle it)
 window.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
+  if (escHandled) { escHandled = false; return; } // the race already handled it
   if (game.state !== 'menu') return; // game.js handles in-race ESC
   if (!$('leaderboard').classList.contains('hidden')) { hide($('leaderboard')); return; }
   if (!$('finish').classList.contains('hidden')) { hide($('finish')); toTrackSelect(); return; }

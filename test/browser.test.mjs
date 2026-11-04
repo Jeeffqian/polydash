@@ -119,6 +119,62 @@ await page.click('#ed-test');
 await new Promise(r => setTimeout(r, 1200));
 const customHud = await page.$eval('#hud', el => !el.classList.contains('hidden'));
 console.log('custom track hud visible:', customHud);
+if (!customHud) errors.push('[assert] editor test drive did not show the HUD');
+
+// the test drive must actually build a drivable track (this used to be NaN)
+const custom = await page.evaluate(() => {
+  const g = window.__game;
+  if (!g || !g.track) return { built: false };
+  const p = g.track.startPos;
+  return {
+    built: true,
+    id: g.track.id,
+    length: g.track.length,
+    startFinite: Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z),
+    carFinite: Number.isFinite(g.car.pos.x) && Number.isFinite(g.car.pos.z),
+    kids: g.trackGroup ? g.trackGroup.children.length : 0,
+  };
+});
+console.log('custom track:', JSON.stringify(custom));
+if (!custom.built) errors.push('[assert] editor test drive built no track');
+if (!(custom.length > 50)) errors.push(`[assert] custom track length is ${custom.length}`);
+if (!custom.startFinite || !custom.carFinite) errors.push('[assert] custom track has NaN positions');
+if (!(custom.kids > 10)) errors.push('[assert] custom track scene is empty');
+
+// ESC from a test drive goes back to the editor, not the main menu
+await page.keyboard.press('Escape');
+await new Promise(r => setTimeout(r, 600));
+const backToEditor = await page.evaluate(() => ({
+  editor: !document.getElementById('editor').classList.contains('hidden'),
+  menu: !document.getElementById('menu').classList.contains('hidden'),
+}));
+console.log('esc from test drive →', JSON.stringify(backToEditor));
+if (!backToEditor.editor) errors.push('[assert] ESC from test drive did not return to the editor');
+
+// the saved custom track must be selectable from the track list too
+await page.evaluate(() => {
+  if (!document.getElementById('editor').classList.contains('hidden')) {
+    document.getElementById('ed-exit').click();
+  }
+});
+await new Promise(r => setTimeout(r, 400));
+await page.click('#btn-play');
+await new Promise(r => setTimeout(r, 400));
+const customCard = await page.evaluate(() => {
+  const cards = Array.from(document.querySelectorAll('.track-card'));
+  const last = cards[cards.length - 1];
+  last.click();
+  return last.dataset.track;
+});
+await new Promise(r => setTimeout(r, 1200));
+const fromList = await page.evaluate(() => {
+  const g = window.__game;
+  return { hasTrack: !!g.track, length: g.track ? g.track.length : 0 };
+});
+console.log('custom track from list:', customCard, JSON.stringify(fromList));
+if (customCard.startsWith('custom') && !(fromList.length > 50)) {
+  errors.push('[assert] custom track card did not load the saved track');
+}
 
 // filter errors: ignore benign ones
 const benign = [

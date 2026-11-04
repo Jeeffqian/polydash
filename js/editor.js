@@ -190,8 +190,19 @@ export class TrackEditor {
       $('editor-hint').textContent = 'Place at least 4 points before test driving.';
       return;
     }
+    // reject degenerate layouts instead of dropping the player into an empty world
+    let len = 0;
+    for (let i = 0; i < this.points.length; i++) {
+      const a = this.points[i], b = this.points[(i + 1) % this.points.length];
+      len += Math.hypot(b.x - a.x, b.z - a.z);
+    }
+    if (!Number.isFinite(len) || len < 40) {
+      $('editor-hint').textContent = 'Track too small — spread the corners further apart (at least ~40 m around the loop).';
+      return;
+    }
     this.save();
-    this.onTest(this.points.map(p => [p.x, 0, p.z]));
+    // pass plain objects: the game reads .x / .z
+    this.onTest(this.points.map(p => ({ x: p.x, z: p.z })));
   }
 
   exit() {

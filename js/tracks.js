@@ -314,6 +314,48 @@ function makeCheckerTexture(repeatX = 8) {
   return tex;
 }
 
+function makeStartLineTexture(cols = 16) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 32;
+  const ctx = c.getContext('2d');
+  const step = 256 / cols;
+  for (let y = 0; y < 2; y++) {
+    for (let x = 0; x < cols; x++) {
+      ctx.fillStyle = (x + y) % 2 === 0 ? '#f2f2f2' : '#15181e';
+      ctx.fillRect(Math.floor(x * step), y * 16, Math.ceil(step), 16);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.repeat.set(1, 1);
+  return tex;
+}
+
+/** Dark banner with checkered strips and a label — used for the start gate. */
+function makeBannerTexture(label) {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 160;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#151b26';
+  ctx.fillRect(0, 0, c.width, c.height);
+  const band = 22;
+  for (let x = 0; x < c.width / band; x++) {
+    ctx.fillStyle = x % 2 === 0 ? '#f2f2f2' : '#141414';
+    ctx.fillRect(x * band, 0, band, band);
+    ctx.fillStyle = x % 2 === 0 ? '#141414' : '#f2f2f2';
+    ctx.fillRect(x * band, c.height - band, band, band);
+  }
+  ctx.fillStyle = '#f4f6fa';
+  ctx.font = 'bold 62px system-ui, "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, c.width / 2, c.height / 2 + 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
 // ------------------------------------------------------------- sky dome
 
 function buildSky(theme) {
@@ -618,7 +660,18 @@ function buildHorizon(track, theme) {
 // -------------------------------------------------------- build a track
 
 export function buildTrack(def) {
+  if (!def || !Array.isArray(def.points) || def.points.length < 3) {
+    throw new Error('buildTrack: track definition needs at least 3 points');
+  }
+  for (const p of def.points) {
+    for (const v of p) {
+      if (!Number.isFinite(v)) throw new Error('buildTrack: track definition contains a non-finite coordinate');
+    }
+  }
   const track = new TrackData(def);
+  if (!Number.isFinite(track.length) || track.length < 20) {
+    throw new Error('buildTrack: degenerate track (length ' + track.length + ')');
+  }
   const theme = THEMES[def.theme] || THEMES.meadow;
   const group = new THREE.Group();
   group.name = 'trackGroup';
@@ -724,35 +777,58 @@ export function buildTrack(def) {
     group.add(wall);
   }
 
-  // ---- start gantry (truss style)
+  // ---- start / finish gate (banner style)
   {
-    const s0 = track.samples[0];
-    const yaw = track.startYaw;
+    // sit the gate a few metres up the road so it frames the start view
+    // instead of clipping the top of the camera
+    const gi = Math.round(6 / (track.length / track.N)) % track.N;
+    const s0 = track.samples[gi];
+    const yaw = Math.atan2(s0.t.x, s0.t.z);
     const g = new THREE.Group();
-    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x2a3242, roughness: 0.6, metalness: 0.3 });
+    const pillarMat = new THREE.MeshStandardMaterial({ color: 0x262e3c, roughness: 0.65, metalness: 0.35 });
+    const gateH = 7.4;
     for (const side of [-1, 1]) {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(0.7, 6.4, 0.7), pillarMat);
-      p.position.set(side * (halfW + 2.6), 3.2, 0);
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.55, gateH, 0.55), pillarMat);
+      p.position.set(side * (halfW + 1.8), gateH / 2, 0);
       p.castShadow = true;
       g.add(p);
+      // small foot block so the pillars do not look pasted on
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.35, 1.0), pillarMat);
+      foot.position.set(side * (halfW + 1.8), 0.17, 0);
+      g.add(foot);
     }
-    const beamGeo = new THREE.BoxGeometry((halfW + 3) * 2, 1.0, 0.9);
-    const beam = new THREE.Mesh(beamGeo, new THREE.MeshStandardMaterial({
-      map: makeCheckerTexture(Math.round((halfW + 3) * 1.2)), roughness: 0.7,
-    }));
-    beam.position.y = 6.6;
-    g.add(beam);
-    // truss diagonals
-    const diagMat = new THREE.MeshStandardMaterial({ color: 0x38445c, roughness: 0.6 });
-    for (let k = -3; k <= 3; k++) {
-      const d = new THREE.Mesh(new THREE.BoxGeometry(0.18, 2.4, 0.18), diagMat);
-      d.position.set(k * (halfW / 3.5), 5.2, 0);
-      d.rotation.z = k % 2 === 0 ? 0.6 : -0.6;
-      g.add(d);
-    }
+    const bannerW = (halfW + 2.05) * 2;
+    const bannerTex = makeBannerTexture('START / FINISH');
+    const banner = new THREE.Mesh(
+      new THREE.BoxGeometry(bannerW, 1.7, 0.35),
+      new THREE.MeshStandardMaterial({
+        map: bannerTex, roughness: 0.8,
+        emissive: 0xffffff, emissiveMap: bannerTex, emissiveIntensity: 0.55,
+      })
+    );
+    banner.position.y = gateH - 0.5;
+    banner.castShadow = true;
+    g.add(banner);
+    const underside = new THREE.Mesh(
+      new THREE.BoxGeometry(bannerW, 0.28, 0.5),
+      new THREE.MeshStandardMaterial({ color: 0x1b2230, roughness: 0.7 })
+    );
+    underside.position.y = gateH - 1.5;
+    g.add(underside);
     g.position.set(s0.p.x, s0.p.y, s0.p.z);
     g.rotation.y = yaw;
     group.add(g);
+  }
+
+  // ---- checkered start / finish line painted on the tarmac
+  {
+    const s0 = track.samples[0];
+    const lineGeo = new THREE.PlaneGeometry(halfW * 2 - 0.2, 1.6);
+    lineGeo.rotateX(-Math.PI / 2);
+    const line = new THREE.Mesh(lineGeo, new THREE.MeshBasicMaterial({ map: makeStartLineTexture(18) }));
+    line.position.set(s0.p.x, s0.p.y + 0.095, s0.p.z);
+    line.rotation.y = track.startYaw;
+    group.add(line);
   }
 
   // ---- checkpoint arches

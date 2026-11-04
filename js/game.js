@@ -94,6 +94,14 @@ export class Game {
   // ------------------------------------------------------------ state flow
 
   startTrack(def) {
+    // build first: if the definition is bad we keep the current world intact
+    let built;
+    try {
+      built = buildTrack(def);
+    } catch (err) {
+      console.warn('[PolyDash] track rejected:', err.message);
+      return false;
+    }
     // clear previous track
     if (this.trackGroup) {
       this.scene.remove(this.trackGroup);
@@ -107,7 +115,6 @@ export class Game {
         }
       });
     }
-    const built = buildTrack(def);
     this.track = built.track;
     this.trackGroup = built.group;
     this.theme = built.theme;
@@ -140,6 +147,7 @@ export class Game {
 
     this.state = 'countdown';
     this.countdownT = 3.2;
+    return true;
   }
 
   restart() {

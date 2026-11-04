@@ -80,5 +80,27 @@ for (const def of TRACKS) {
   check(`speed: straight-line speed sane (${v0.toFixed(1)} m/s)`, v0 > 15 && v0 < 60);
 }
 
+// custom track built in the editor: same smoothing/geometry pipeline as the game
+{
+  const pts = [
+    { x: -100, z: 70 }, { x: 0, z: 110 }, { x: 100, z: 60 },
+    { x: 110, z: -50 }, { x: 10, z: -100 }, { x: -90, z: -50 },
+  ];
+  const def = {
+    id: 'custom_test', name: 'Custom Track', theme: 'meadow', width: 12,
+    points: pts.map(p => [p.x, 0, p.z]),
+  };
+  const track = new TrackData(def);
+  check(`custom: loop has real length (${Math.round(track.length)} m)`,
+    Number.isFinite(track.length) && track.length > 100);
+  check('custom: start position is finite',
+    Number.isFinite(track.startPos.x) && Number.isFinite(track.startPos.z));
+  const r = driveLap(def, { maxSeconds: 180 });
+  check(`custom: completes a lap in <180s (${(r.t / 1000).toFixed(1)}s)`, r.laps >= 1 && !r.nan);
+  check(`custom: no NaN`, !r.nan);
+  check(`custom: stays on the road (max |lateral| ${r.maxLateral.toFixed(1)})`,
+    r.maxLateral < def.width / 2 + 2);
+}
+
 console.log(failures === 0 ? '\nALL PHYSICS TESTS PASSED' : `\n${failures} TEST(S) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
