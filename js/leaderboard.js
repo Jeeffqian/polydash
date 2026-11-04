@@ -2,14 +2,16 @@
 // Table `leaderboard`: track_id, player_name, time_ms, created_at
 // Public read + public insert (validated by RLS policy).
 
-import { CLOUD_CONFIG } from './config.js';
+import { CLOUD_CONFIG, CLOUD_ALLOWED_HOSTS } from './config.js';
 
 let cloud = null;
 // set after a request fails or hangs (wrong origin, offline, blocked CORS) so
 // the UI stops waiting and falls back to local times straight away
 let cloudUnreachable = false;
+const hostAllowed = typeof location === 'undefined'
+  || CLOUD_ALLOWED_HOSTS.includes(location.hostname);
 try {
-  if (typeof window !== 'undefined' && window.WorkBuddyCloud) {
+  if (hostAllowed && typeof window !== 'undefined' && window.WorkBuddyCloud) {
     cloud = window.WorkBuddyCloud.createWorkBuddyCloud({
       endpoint: CLOUD_CONFIG.endpoint,
       publishableKey: CLOUD_CONFIG.publishableKey,
