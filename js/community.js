@@ -1,8 +1,15 @@
-// Community tracks: player-built layouts saved in this browser, plus share
-// codes so a track can be sent to someone else (and compete on the same id).
+// Community tracks: player-built layouts saved in this browser, sent to a
+// shared cloud library so other devices see them, plus share codes so a track
+// can be sent to someone else (and compete on the same id).
+
+import {
+  cloudClient, cloudAvailable, markCloudUnreachable,
+  withTimeout, CLOUD_TIMEOUT_MS,
+} from './cloud.js';
 
 const LIB_KEY = 'polydash_community_tracks';
 const DRAFT_KEY = 'polydash_custom_track';   // the layout currently open in the editor
+const HIDDEN_KEY = 'polydash_hidden_tracks'; // cloud tracks removed on this device
 const SHARE_VERSION = 1;
 
 // ---------------------------------------------------------------- storage
@@ -118,13 +125,113 @@ export function saveTrack({ id, name, author, points }) {
   if (idx >= 0) lib[idx] = record;
   else lib.unshift(record);
   writeJSON(LIB_KEY, lib);
+  void publishTrack(record);   // fire-and-forget cloud copy
   return record;
 }
 
 export function deleteTrack(id) {
   const lib = listTracks().filter(t => t.id !== id);
   writeJSON(LIB_KEY, lib);
+  hideTrack(id);               // keep a cloud copy from popping back up here
   return lib;
+}
+
+// ---------------------------------------------------------------- cloud library
+// Shared table `community_tracks` — public read, public insert (RLS validated).
+// Without a reachable cloud backend everything still works, just local-only.
+
+function hiddenTrackIds() {
+  const raw = readJSON(HIDDEN_KEY, []);
+  return Array.isArray(raw) ? raw : [];
+}
+
+/** Stop showing a cloud track on this device (after a local delete). */
+export function hideTrack(id) {
+  if (!id) return;
+  const ids = hiddenTrackIds();
+  if (ids.includes(id)) return;
+  ids.push(id);
+  writeJSON(HIDDEN_KEY, ids.slice(-200));
+}
+
+export function unhideAllTracks() {
+  writeJSON(HIDDEN_KEY, []);
+}
+
+/** Upload one record. Duplicates (same shape id) count as success. */
+export async function publishTrack(rec) {
+  const cloud = cloudClient();
+  if (!cloud || !cloudAvailable() || !rec) return false;
+  const points = normalizePoints(rec.points).map(p => [Math.round(p.x * 10) / 10, Math.round(p.z * 10) / 10]);
+  if (points.length < 4) return false;
+  try {
+    const insert = cloud.database.from('community_tracks').insert({
+      id: rec.id,
+      name: String(rec.name || 'Untitled Track').slice(0, 32),
+      author: String(rec.author || 'Anonymous').slice(0, 20),
+      points,
+      length: Math.round(rec.length || loopLength(rec.points)),
+    });
+    const res = await withTimeout(insert, CLOUD_TIMEOUT_MS, { timedOut: true });
+    if (res && res.timedOut) { markCloudUnreachable(); return false; }
+    if (res.error) {
+      const msg = String(res.error.message || '');
+      if (/duplicate|23505|already exists/i.test(msg)) return true;
+      console.warn('Track upload failed:', msg);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn('Track upload failed:', e);
+    return false;
+  }
+}
+
+/** Every track published from any device, newest first. */
+export async function fetchCloudTracks() {
+  const cloud = cloudClient();
+  if (!cloud || !cloudAvailable()) return [];
+  try {
+    const query = cloud.database
+      .from('community_tracks')
+      .select('id, name, author, points, length, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    const res = await withTimeout(query, CLOUD_TIMEOUT_MS * 2, { timedOut: true });
+    if (res && res.timedOut) { markCloudUnreachable(); return []; }
+    if (res.error) {
+      console.warn('Track sync failed:', res.error.message);
+      return [];
+    }
+    const hidden = hiddenTrackIds();
+    return (res.data || [])
+      .map(row => {
+        const points = normalizePoints(row.points);
+        return {
+          id: String(row.id || trackIdFor(points)),
+          name: String(row.name || 'Untitled Track').slice(0, 32),
+          author: String(row.author || 'Anonymous').slice(0, 20),
+          points,
+          length: Number(row.length) || Math.round(loopLength(points)),
+          createdAt: row.created_at ? Date.parse(row.created_at) : 0,
+          cloud: true,
+        };
+      })
+      .filter(t => t.points.length >= 4 && !hidden.includes(t.id));
+  } catch (e) {
+    console.warn('Track sync failed:', e);
+    return [];
+  }
+}
+
+/** Push this device's tracks that the shared library has not seen yet. */
+export async function pushLocalTracks() {
+  if (!cloudAvailable()) return 0;
+  let sent = 0;
+  for (const rec of listTracks().slice(0, 20)) {
+    if (await publishTrack(rec)) sent++;
+  }
+  return sent;
 }
 
 // ---------------------------------------------------------------- draft (editor)

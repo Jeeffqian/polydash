@@ -6,7 +6,7 @@ import { TRACKS } from './tracks.js';
 import { fetchTop, submitScore, cloudAvailable } from './leaderboard.js';
 import {
   normalizePoints, loopLength, trackIdFor, listTracks, getTrack, saveTrack, deleteTrack,
-  decodeShare, migrateLegacy,
+  decodeShare, migrateLegacy, fetchCloudTracks, pushLocalTracks,
 } from './community.js';
 import { formatTime, show, hide, toast, getBest, setBest, medalFor, MEDAL_ICON, getPlayerName, setPlayerName } from './ui.js';
 
@@ -63,7 +63,10 @@ function setTab(name) {
     if (btn) btn.classList.toggle('active', on);
   }
   if (activeTab === 'official') buildOfficialGrid();
-  else buildCommunityGrid();
+  else {
+    buildCommunityGrid();
+    if (!cloudSynced && cloudAvailable()) void refreshCloudTracks();
+  }
 }
 
 function toTrackSelect(tab) {
@@ -147,29 +150,80 @@ function communityCardHtml(rec) {
   const best = getBest(rec.id);
   const medal = best != null ? medalFor(best, medalsForLength(rec.length)) : null;
   const bestStr = best != null ? formatTime(best) : '—';
+  const cloudTag = rec.cloud ? '<span class="cloud-tag" title="Shared from another device">☁ cloud</span>' : '';
+  const actions = rec.cloud
+    ? `<button class="btn small lb-btn" data-lb="${rec.id}" title="Leaderboard">🏆</button>`
+    : `<button class="btn small lb-btn" data-lb="${rec.id}" title="Leaderboard">🏆</button>
+       <button class="btn small edit-btn" data-edit="${rec.id}" title="Edit in editor">✎</button>
+       <button class="btn small del-btn" data-del="${rec.id}" title="Delete">🗑</button>`;
   return `
     <div class="track-card" data-track="${rec.id}">
-      <div class="diff">by ${escapeHtml(rec.author)} · ${rec.length} m</div>
+      <div class="diff">by ${escapeHtml(rec.author)} · ${rec.length} m ${cloudTag}</div>
       <h3>${escapeHtml(rec.name)}</h3>
       <div class="meta">
         <span>best: <b>${bestStr}</b> ${medal ? MEDAL_ICON[medal] : ''}</span>
-        <span class="card-actions">
-          <button class="btn small lb-btn" data-lb="${rec.id}" title="Leaderboard">🏆</button>
-          <button class="btn small edit-btn" data-edit="${rec.id}" title="Edit in editor">✎</button>
-          <button class="btn small del-btn" data-del="${rec.id}" title="Delete">🗑</button>
-        </span>
+        <span class="card-actions">${actions}</span>
       </div>
     </div>`;
 }
 
+// ------------------------------------------------------------ cloud library state
+
+let cloudRecords = [];
+let cloudSynced = false;
+let cloudBusy = false;
+
+/** Local tracks first (editable), then cloud-only tracks from other devices. */
+function communityRecords() {
+  const local = listTracks();
+  const ids = new Set(local.map(t => t.id));
+  return local.concat(cloudRecords.filter(r => !ids.has(r.id)));
+}
+
+function findCommunityRecord(id) {
+  return getTrack(id) || cloudRecords.find(r => r.id === id) || null;
+}
+
+function updateCommunityHint(count) {
+  const hint = $('community-hint');
+  if (!hint) return;
+  if (!cloudAvailable()) {
+    hint.textContent = 'Saved in this browser only — open the online build to sync tracks across devices.';
+  } else if (cloudBusy) {
+    hint.textContent = 'Syncing shared tracks…';
+  } else if (cloudSynced) {
+    hint.textContent = `Synced · ${count} track${count === 1 ? '' : 's'} shared across your devices (☁ = from the cloud).`;
+  }
+}
+
+async function refreshCloudTracks() {
+  if (!cloudAvailable()) {
+    cloudSynced = true;
+    if (activeTab === 'community') buildCommunityGrid();
+    return;
+  }
+  if (cloudBusy) return;
+  cloudBusy = true;
+  if (activeTab === 'community') updateCommunityHint(communityRecords().length);
+  const rows = await fetchCloudTracks();
+  cloudRecords = rows;
+  cloudBusy = false;
+  cloudSynced = true;
+  if (activeTab === 'community') buildCommunityGrid();
+}
+
 function buildCommunityGrid() {
   const grid = $('community-grid');
-  const records = listTracks();
+  const records = communityRecords();
   $('community-count').textContent = records.length;
 
   grid.innerHTML = records.length
     ? records.map(communityCardHtml).join('')
-    : '<div class="community-empty">No community tracks yet.<br>Build one in the editor, or import a share code below.</div>';
+    : cloudBusy
+      ? '<div class="community-empty">Syncing shared tracks…</div>'
+      : '<div class="community-empty">No community tracks yet.<br>Build one in the editor, or import a share code below.</div>';
+
+  updateCommunityHint(records.length);
 
   grid.querySelectorAll('.track-card').forEach(card => {
     card.addEventListener('click', (e) => {
@@ -198,7 +252,7 @@ function buildCommunityGrid() {
 }
 
 function playCommunity(id) {
-  const rec = getTrack(id);
+  const rec = findCommunityRecord(id);
   if (!rec) { toast('That track is no longer saved.'); return; }
   const def = customDef(rec.points, rec);
   if (!def) { toast('That track is too small or broken — open it in the editor.'); return; }
@@ -253,7 +307,7 @@ let lbTrackId = null;
 async function openLeaderboard(trackId) {
   lbTrackId = trackId;
   const def = TRACKS.find(t => t.id === trackId);
-  const rec = def ? null : getTrack(trackId);
+  const rec = def ? null : findCommunityRecord(trackId);
   const label = def ? def.name : rec ? rec.name : 'Community Track';
   $('lb-title').textContent = `${label} — TOP 10`;
   const list = $('lb-list');
@@ -433,3 +487,13 @@ window.__game = game;
 // boot: pull any pre-library custom track into the community list
 migrateLegacy();
 toMenu();
+
+// boot: share this device's tracks and pull everyone else's (no-op offline)
+if (cloudAvailable()) {
+  (async () => {
+    await pushLocalTracks();
+    await refreshCloudTracks();
+  })();
+} else {
+  cloudSynced = true;
+}

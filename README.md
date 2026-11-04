@@ -9,6 +9,7 @@ A low-poly, time-trial drift racing game that runs in your browser. Built with T
 ## Features
 
 - **Two track sections** — `OFFICIAL` (the 6 built-in circuits) and `COMMUNITY` (tracks you and other players build in the editor).
+- **Community tracks sync across devices** — tracks saved in the editor are published to the shared cloud library, so a layout built on one computer shows up on every other device (☁ badge). Share codes still work for sending a single track.
 - **6 official tracks** across 6 themed environments — meadow, desert, snow, sunset city, neon nights and volcano rim, each with its own palette, lighting and decorations.
 - **Drift physics** — hold SPACE to slide through corners; drifting charges a boost meter that rewards you with extra speed when you exit the drift.
 - **Ghost replay** — your best lap is recorded turn-by-turn; race against your own translucent ghost on every track.
@@ -58,7 +59,7 @@ Then open the printed URL in your browser. (Opening `index.html` directly via `f
 
 **Playable build with the online leaderboard:** https://polydash-game.app.workbuddy.host/?sharecode=RIRHYZ7NMN
 
-The game is a static site, so it runs anywhere — including GitHub Pages (`https://jeeffqian.github.io/polydash/`, code mirror). The **online leaderboard**, however, only answers the domain it was provisioned for (`polydash-game.app.workbuddy.host`) and localhost. On any other host the client is skipped and the game falls back to local best times and ghosts, with a notice in the leaderboard panel. Everything else (tracks, physics, editor, community tracks, ghost) works identically.
+The game is a static site, so it runs anywhere — including GitHub Pages (`https://jeeffqian.github.io/polydash/`, code mirror). The **online leaderboard** and the **shared community-track library** only answer the domain the backend was provisioned for (`polydash-game.app.workbuddy.host`) and localhost. On any other host they are skipped and the game falls back to local best times, ghosts and a browser-local track list. Everything else (tracks, physics, editor, racing) works identically. Set `localStorage.polydash_cloud_off = '1'` to force that local-only mode on any host (the smoke test does this so it never writes to the live database).
 
 ## Tests
 

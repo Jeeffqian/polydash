@@ -174,6 +174,12 @@ html, body {
 .track-card:hover { transform: translateY(-2px); border-color: var(--accent); }
 .track-card h3 { font-size: 17px; margin-bottom: 4px; }
 .track-card .diff { font-size: 12px; color: var(--accent-2); letter-spacing: 2px; text-transform: uppercase; }
+.cloud-tag {
+  display: inline-block; margin-left: 6px; padding: 1px 7px;
+  font-size: 10px; letter-spacing: 1px; color: #8fdcff;
+  border: 1px solid rgba(120, 210, 255, .38); border-radius: 999px;
+  background: rgba(70, 170, 230, .10);
+}
 .track-card .meta { margin-top: 10px; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; }
 .track-card .medal { font-size: 15px; }
 

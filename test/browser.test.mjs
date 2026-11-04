@@ -21,6 +21,10 @@ const browser = await puppeteer.launch({
 });
 const page = await browser.newPage();
 await page.setViewport({ width: 1280, height: 800 });
+// keep the smoke test local-only: never write test tracks/scores to the shared DB
+await page.evaluateOnNewDocument(() => {
+  try { localStorage.setItem('polydash_cloud_off', '1'); } catch (e) {}
+});
 
 page.on('console', (msg) => {
   if (msg.type() === 'error' || msg.type() === 'warning') {
