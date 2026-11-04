@@ -2,7 +2,8 @@
 // road width, then test drive. Snap / undo / zoom / share via export code.
 
 import * as THREE from 'three';
-import { formatTime } from './ui.js';
+import { formatTime, getPlayerName } from './ui.js';
+import { loadDraft, saveDraft, saveTrack, encodeShare, decodeShare, normalizePoints, loopLength } from './community.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -10,12 +11,14 @@ export class TrackEditor {
   constructor(onTest) {
     this.canvas = $('editor-canvas');
     this.ctx = this.canvas.getContext('2d');
+    this.nameInput = $('ed-name');
     this.points = [];
     this.tool = 'add';
     this.dragIdx = -1;
     this.view = 480;          // world meters across the canvas
     this.snap = true;
     this.onTest = onTest;
+    this.editingId = null;    // set when the open layout came from the library
     this.loadSaved();
 
     this.canvas.addEventListener('pointerdown', (e) => this.onDown(e));
@@ -34,9 +37,14 @@ export class TrackEditor {
     $('ed-zoom-in').addEventListener('click', () => { this.view = Math.max(240, this.view - 120); });
     $('ed-zoom-out').addEventListener('click', () => { this.view = Math.min(960, this.view + 120); });
     $('ed-test').addEventListener('click', () => this.test());
+    $('ed-save').addEventListener('click', () => this.saveToCommunity());
     $('ed-export').addEventListener('click', () => this.exportCode());
     $('ed-import').addEventListener('click', () => this.importCode());
-    $('ed-clear').addEventListener('click', () => { this.points = []; this.save(); });
+    $('ed-clear').addEventListener('click', () => {
+      this.points = [];
+      this.save();
+      this.hint('Canvas cleared — start dropping corners.');
+    });
     $('ed-exit').addEventListener('click', () => this.exit());
 
     // keep rendering while visible
@@ -135,29 +143,87 @@ export class TrackEditor {
   // ------------------------------------------------------ persistence
 
   save() {
-    try { localStorage.setItem('polydash_custom_track', JSON.stringify(this.points)); } catch (e) { /* ignore */ }
+    saveDraft(this.points);
+  }
+
+  hint(text) {
+    $('editor-hint').textContent = text;
+  }
+
+  currentName() {
+    return (this.nameInput.value || '').trim().slice(0, 32) || 'Untitled Track';
+  }
+
+  focusName() {
+    if (this.nameInput) this.nameInput.focus();
+  }
+
+  /** Open an existing community track for editing. */
+  load(rec) {
+    this.points = normalizePoints(rec.points);
+    this.nameInput.value = rec.name || '';
+    this.editingId = rec.id || null;
+    this.save();
+    this.draw();
+    this.hint(`Editing "${rec.name}" — hit SAVE when you are done.`);
+  }
+
+  /** Start a blank layout. */
+  reset() {
+    this.points = [];
+    this.nameInput.value = '';
+    this.editingId = null;
+    this.save();
+    this.draw();
+    this.hint('New track — click to drop corners, name it, then SAVE.');
+    this.focusName();
+  }
+
+  saveToCommunity() {
+    if (this.points.length < 4) {
+      this.hint('Place at least 4 corners before saving.');
+      return null;
+    }
+    const len = loopLength(this.points);
+    if (!Number.isFinite(len) || len < 40) {
+      this.hint('Track too small — spread the corners further apart (at least ~40 m around the loop).');
+      return null;
+    }
+    const rec = saveTrack({
+      id: this.editingId || undefined,
+      name: this.currentName(),
+      author: getPlayerName() || 'You',
+      points: this.points,
+    });
+    if (!rec) {
+      this.hint('Could not save — browser storage may be full.');
+      return null;
+    }
+    this.editingId = rec.id;
+    this.nameInput.value = rec.name;
+    this.save();
+    this.hint(`Saved "${rec.name}" to community tracks (${rec.length} m) — find it under PLAY → COMMUNITY.`);
+    return rec;
   }
 
   loadSaved() {
-    try {
-      const raw = localStorage.getItem('polydash_custom_track');
-      if (raw) {
-        const pts = JSON.parse(raw);
-        if (Array.isArray(pts) && pts.length >= 4) this.points = pts;
-      }
-    } catch (e) { /* ignore */ }
+    this.points = loadDraft();
   }
 
   exportCode() {
     const io = $('editor-io');
     io.classList.remove('hidden');
-    io.value = btoa(JSON.stringify(this.points));
+    io.value = encodeShare({
+      name: this.currentName(),
+      author: getPlayerName() || 'You',
+      points: this.points,
+    });
     io.select();
     try {
       document.execCommand('copy');
-      $('editor-hint').textContent = 'Track code generated and copied — paste it anywhere to share.';
+      this.hint('Track code copied — paste it under PLAY → COMMUNITY → IMPORT.');
     } catch (e) {
-      $('editor-hint').textContent = 'Select the code below and copy it manually.';
+      this.hint('Select the code below and copy it manually.');
     }
   }
 
@@ -167,42 +233,36 @@ export class TrackEditor {
       io.classList.remove('hidden');
       io.value = '';
       io.placeholder = 'Paste a track code here, then click IMPORT again';
-      $('editor-hint').textContent = 'Paste a shared track code into the text box, then press IMPORT again.';
+      this.hint('Paste a shared track code into the text box, then press IMPORT again.');
       return;
     }
-    try {
-      const pts = JSON.parse(atob(io.value.trim()));
-      if (Array.isArray(pts) && pts.length >= 4 && pts.every(p => typeof p.x === 'number' && typeof p.z === 'number')) {
-        this.points = pts;
-        this.save();
-        io.classList.add('hidden');
-        $('editor-hint').textContent = 'Track imported!';
-      } else {
-        throw new Error('bad format');
-      }
-    } catch (err) {
-      $('editor-hint').textContent = 'Invalid track code — please paste a code exported from PolyDash.';
+    const data = decodeShare(io.value);
+    if (!data) {
+      this.hint('Invalid track code — paste a code exported from PolyDash.');
+      return;
     }
+    this.points = data.points;
+    this.nameInput.value = data.name || '';
+    this.editingId = null;
+    this.save();
+    io.classList.add('hidden');
+    this.hint(`Imported "${data.name || 'track'}" — press SAVE to keep it in your community tracks.`);
   }
 
   test() {
     if (this.points.length < 4) {
-      $('editor-hint').textContent = 'Place at least 4 points before test driving.';
+      this.hint('Place at least 4 points before test driving.');
       return;
     }
     // reject degenerate layouts instead of dropping the player into an empty world
-    let len = 0;
-    for (let i = 0; i < this.points.length; i++) {
-      const a = this.points[i], b = this.points[(i + 1) % this.points.length];
-      len += Math.hypot(b.x - a.x, b.z - a.z);
-    }
+    const len = loopLength(this.points);
     if (!Number.isFinite(len) || len < 40) {
-      $('editor-hint').textContent = 'Track too small — spread the corners further apart (at least ~40 m around the loop).';
+      this.hint('Track too small — spread the corners further apart (at least ~40 m around the loop).');
       return;
     }
     this.save();
     // pass plain objects: the game reads .x / .z
-    this.onTest(this.points.map(p => ({ x: p.x, z: p.z })));
+    this.onTest(this.points.map(p => ({ x: p.x, z: p.z })), this.currentName());
   }
 
   exit() {

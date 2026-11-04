@@ -200,6 +200,9 @@ export class Game {
   // ------------------------------------------------------------ input
 
   onKey(e, down) {
+    // never steal keys while the player is typing a name or a share code
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     this.keys[e.code] = down;
     if (down && e.code === 'KeyR' && (this.state === 'racing' || this.state === 'countdown' || this.state === 'finished')) {
       this.restart();

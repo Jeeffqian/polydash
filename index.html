@@ -59,7 +59,26 @@
           <h2>SELECT TRACK</h2>
           <button class="btn btn-close" data-close="track-select">✕</button>
         </div>
-        <div id="track-grid"></div>
+
+        <div class="tabs">
+          <button class="tab active" data-tab="official">OFFICIAL <span class="count">6</span></button>
+          <button class="tab" data-tab="community">COMMUNITY <span class="count" id="community-count">0</span></button>
+        </div>
+
+        <div id="tab-official" class="tab-body">
+          <p class="tab-hint">Six hand-built circuits that ship with the game — one per theme.</p>
+          <div id="track-grid"></div>
+        </div>
+
+        <div id="tab-community" class="tab-body hidden">
+          <p class="tab-hint">Tracks built in the editor, saved in this browser. Paste a share code to add someone else's.</p>
+          <div id="community-grid"></div>
+          <div class="community-tools">
+            <button id="btn-new-track" class="btn small btn-primary">+ NEW TRACK</button>
+            <input id="community-code" placeholder="Paste a share code…" spellcheck="false" autocomplete="off">
+            <button id="btn-import-code" class="btn small">IMPORT</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -98,6 +117,7 @@
       <div class="editor-wrap">
         <div class="editor-toolbar">
           <h2>TRACK EDITOR</h2>
+          <input id="ed-name" class="editor-name" maxlength="32" placeholder="Track name" spellcheck="false">
           <button id="ed-add" class="btn small active">ADD CORNER</button>
           <button id="ed-move" class="btn small">MOVE</button>
           <button id="ed-del" class="btn small">DELETE</button>
@@ -108,6 +128,7 @@
           <button id="ed-zoom-out" class="btn small">ZOOM −</button>
           <span class="sep"></span>
           <button id="ed-test" class="btn small btn-primary">TEST DRIVE</button>
+          <button id="ed-save" class="btn small">SAVE</button>
           <button id="ed-export" class="btn small">EXPORT</button>
           <button id="ed-import" class="btn small">IMPORT</button>
           <button id="ed-clear" class="btn small">CLEAR</button>

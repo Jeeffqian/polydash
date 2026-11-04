@@ -4,6 +4,10 @@ import { Game } from './game.js';
 import { TrackEditor } from './editor.js';
 import { TRACKS } from './tracks.js';
 import { fetchTop, submitScore, cloudAvailable } from './leaderboard.js';
+import {
+  normalizePoints, loopLength, trackIdFor, listTracks, getTrack, saveTrack, deleteTrack,
+  decodeShare, migrateLegacy,
+} from './community.js';
 import { formatTime, show, hide, toast, getBest, setBest, medalFor, MEDAL_ICON, getPlayerName, setPlayerName } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -23,16 +27,6 @@ const game = new Game($('game-canvas'), {
   onFinish: (result) => showFinish(result),
 });
 
-// custom track id from its points (so different custom tracks don't mix times)
-function customTrackId(points) {
-  let h = 5381;
-  for (const p of points) {
-    const s = `${Math.round(p[0])},${Math.round(p[1])},${Math.round(p[2])};`;
-    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-  }
-  return `custom_${(h >>> 0).toString(36)}`;
-}
-
 // ------------------------------------------------------------ navigation
 
 function hideAllOverlays() {
@@ -45,22 +39,6 @@ function toMenu() {
   hide($('hud'));
 }
 
-function toTrackSelect() {
-  hideAllOverlays();
-  buildTrackGrid();
-  show($('track-select'));
-}
-
-function startTrack(def) {
-  if (!def) { toast('That track could not be loaded.'); return; }
-  if (!game.startTrack(def)) { toast('That track could not be built — rebuild it in the editor.'); return; }
-  editing = false;
-  hideAllOverlays();
-  show($('hud'));
-  $('hud-splits').innerHTML = '';
-  lastDef = def;
-}
-
 /** Leave a test drive and go back to the editor with the layout intact. */
 function backToEditor() {
   editing = false;
@@ -71,7 +49,41 @@ function backToEditor() {
   editor.draw();
 }
 
-// ------------------------------------------------------------ track grid
+// ------------------------------------------------------------ track select
+
+let activeTab = 'official';
+let returnTab = 'official';
+
+function setTab(name) {
+  activeTab = name === 'community' ? 'community' : 'official';
+  for (const key of ['official', 'community']) {
+    const on = key === activeTab;
+    $(`tab-${key}`).classList.toggle('hidden', !on);
+    const btn = document.querySelector(`.tab[data-tab="${key}"]`);
+    if (btn) btn.classList.toggle('active', on);
+  }
+  if (activeTab === 'official') buildOfficialGrid();
+  else buildCommunityGrid();
+}
+
+function toTrackSelect(tab) {
+  hideAllOverlays();
+  setTab(tab || returnTab);
+  show($('track-select'));
+}
+
+function startTrack(def, tab) {
+  if (!def) { toast('That track could not be loaded.'); return; }
+  if (!game.startTrack(def)) { toast('That track could not be built — try the editor.'); return; }
+  editing = false;
+  if (tab) returnTab = tab;
+  hideAllOverlays();
+  show($('hud'));
+  $('hud-splits').innerHTML = '';
+  lastDef = def;
+}
+
+// ------------------------------------------------------------ official tracks
 
 function cardHtml(def) {
   const best = getBest(def.id);
@@ -88,26 +100,13 @@ function cardHtml(def) {
     </div>`;
 }
 
-function buildTrackGrid() {
+function buildOfficialGrid() {
   const grid = $('track-grid');
-  grid.innerHTML = '';
-
-  grid.innerHTML = TRACKS.map(t => cardHtml(t)).join('') + customCardHtml();
-
+  grid.innerHTML = TRACKS.map(t => cardHtml(t)).join('');
   grid.querySelectorAll('.track-card').forEach(card => {
-    card.addEventListener('click', (e) => {
-      if (e.target.closest('.lb-btn')) return;
-      const id = card.dataset.track;
-      // custom tracks carry a hashed id (custom_xxxx), so match the prefix
-      if (id.startsWith('custom')) {
-        const pts = loadCustomPoints();
-        if (!pts) { toast('No custom track yet — build one in the editor!'); return; }
-        const def = customDef(pts);
-        if (!def) { toast('That custom track is too small or broken — rebuild it in the editor.'); return; }
-        startTrack(def);
-      } else {
-        startTrack(TRACKS.find(t => t.id === id));
-      }
+    card.addEventListener('click', () => {
+      const def = TRACKS.find(t => t.id === card.dataset.track);
+      if (def) startTrack(def, 'official');
     });
   });
   grid.querySelectorAll('.lb-btn').forEach(btn => {
@@ -118,75 +117,133 @@ function buildTrackGrid() {
   });
 }
 
-function loadCustomPoints() {
-  try {
-    const raw = localStorage.getItem('polydash_custom_track');
-    if (!raw) return null;
-    const pts = JSON.parse(raw);
-    return Array.isArray(pts) && pts.length >= 4 ? pts : null;
-  } catch (e) { return null; }
-}
+// ------------------------------------------------------------ community tracks
 
-// The editor stores points as {x, z}, but test-drive used to hand us raw
-// [x, y, z] triples — reading .x/.z off those produced NaN and an invisible
-// track. Accept both shapes and drop anything that is not a finite number.
-function normalizeCustomPoints(pts) {
-  if (!Array.isArray(pts)) return [];
-  const out = [];
-  for (const p of pts) {
-    let x, z;
-    if (Array.isArray(p)) {
-      x = Number(p[0]);
-      z = Number(p.length > 2 ? p[2] : p[1]);
-    } else if (p && typeof p === 'object') {
-      x = Number(p.x);
-      z = Number(p.z);
-    }
-    if (!Number.isFinite(x) || !Number.isFinite(z)) continue;
-    const prev = out[out.length - 1];
-    if (prev && Math.hypot(x - prev.x, z - prev.z) < 1) continue; // duplicate
-    out.push({ x, z });
-  }
-  // drop a trailing point sitting on top of the first one
-  if (out.length > 1) {
-    const a = out[0], b = out[out.length - 1];
-    if (Math.hypot(a.x - b.x, a.z - b.z) < 1) out.pop();
-  }
-  return out;
-}
-
-function customDef(pts) {
-  const clean = normalizeCustomPoints(pts);
-  if (clean.length < 4) return null;
-  const world = clean.map(p => [p.x, 0, p.z]);
-  // rough length from the polygon through the points (curve is a bit longer)
-  let len = 0;
-  for (let i = 0; i < clean.length; i++) {
-    const a = clean[i], b = clean[(i + 1) % clean.length];
-    len += Math.hypot(b.x - a.x, b.z - a.z);
-  }
-  len *= 1.08;
-  if (!Number.isFinite(len) || len < 24) return null;
+function medalsForLength(len) {
   return {
-    id: customTrackId(world),
-    name: 'Custom Track',
-    difficulty: 'Custom',
-    theme: 'meadow',
-    width: 12,
-    points: world,
-    medals: {
-      gold: Math.round(len / 30 * 1000),
-      silver: Math.round(len / 25 * 1000),
-      bronze: Math.round(len / 20 * 1000),
-    },
+    gold: Math.round(len / 30 * 1000),
+    silver: Math.round(len / 25 * 1000),
+    bronze: Math.round(len / 20 * 1000),
   };
 }
 
-function customCardHtml() {
-  const pts = loadCustomPoints();
-  const ptsDef = pts ? customDef(pts) : null;
-  return cardHtml(ptsDef || { id: 'custom', name: 'Custom Track', difficulty: 'Custom', medals: { gold: 1, silver: 2, bronze: 3 } }, true)
-    .replace('<h3>Custom Track</h3>', `<h3>Custom Track${pts ? '' : ' <small style="color:var(--muted)">(empty)</small>'}</h3>`);
+function customDef(pts, meta = {}) {
+  const clean = normalizePoints(pts);
+  if (clean.length < 4) return null;
+  const len = loopLength(clean);
+  if (!Number.isFinite(len) || len < 24) return null;
+  return {
+    id: meta.id || trackIdFor(clean),
+    name: meta.name || 'Community Track',
+    difficulty: 'Community',
+    theme: meta.theme || 'meadow',
+    width: 12,
+    points: clean.map(p => [p.x, 0, p.z]),
+    medals: medalsForLength(len),
+  };
+}
+
+function communityCardHtml(rec) {
+  const best = getBest(rec.id);
+  const medal = best != null ? medalFor(best, medalsForLength(rec.length)) : null;
+  const bestStr = best != null ? formatTime(best) : '—';
+  return `
+    <div class="track-card" data-track="${rec.id}">
+      <div class="diff">by ${escapeHtml(rec.author)} · ${rec.length} m</div>
+      <h3>${escapeHtml(rec.name)}</h3>
+      <div class="meta">
+        <span>best: <b>${bestStr}</b> ${medal ? MEDAL_ICON[medal] : ''}</span>
+        <span class="card-actions">
+          <button class="btn small lb-btn" data-lb="${rec.id}" title="Leaderboard">🏆</button>
+          <button class="btn small edit-btn" data-edit="${rec.id}" title="Edit in editor">✎</button>
+          <button class="btn small del-btn" data-del="${rec.id}" title="Delete">🗑</button>
+        </span>
+      </div>
+    </div>`;
+}
+
+function buildCommunityGrid() {
+  const grid = $('community-grid');
+  const records = listTracks();
+  $('community-count').textContent = records.length;
+
+  grid.innerHTML = records.length
+    ? records.map(communityCardHtml).join('')
+    : '<div class="community-empty">No community tracks yet.<br>Build one in the editor, or import a share code below.</div>';
+
+  grid.querySelectorAll('.track-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      playCommunity(card.dataset.track);
+    });
+  });
+  grid.querySelectorAll('.lb-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openLeaderboard(btn.dataset.lb);
+    });
+  });
+  grid.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      editCommunity(btn.dataset.edit);
+    });
+  });
+  grid.querySelectorAll('.del-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      armDelete(btn, btn.dataset.del);
+    });
+  });
+}
+
+function playCommunity(id) {
+  const rec = getTrack(id);
+  if (!rec) { toast('That track is no longer saved.'); return; }
+  const def = customDef(rec.points, rec);
+  if (!def) { toast('That track is too small or broken — open it in the editor.'); return; }
+  startTrack(def, 'community');
+}
+
+function editCommunity(id) {
+  const rec = getTrack(id);
+  if (!rec) { toast('Track not found.'); return; }
+  hideAllOverlays();
+  show($('editor'));
+  editor.load(rec);
+}
+
+/** Two-step delete: first click arms, second click removes. */
+function armDelete(btn, id) {
+  if (btn.dataset.armed === '1') {
+    deleteTrack(id);
+    buildCommunityGrid();
+    toast('Track deleted.');
+    return;
+  }
+  btn.dataset.armed = '1';
+  btn.textContent = '✕?';
+  btn.classList.add('danger');
+  setTimeout(() => {
+    if (!btn.isConnected) return;
+    btn.dataset.armed = '';
+    btn.textContent = '🗑';
+    btn.classList.remove('danger');
+  }, 3000);
+}
+
+function importCommunityCode() {
+  const input = $('community-code');
+  const code = input.value.trim();
+  if (!code) { toast('Paste a track code first.'); input.focus(); return; }
+  const data = decodeShare(code);
+  if (!data) { toast('That code is not a valid PolyDash track.'); return; }
+  const existed = !!getTrack(trackIdFor(data.points));
+  const rec = saveTrack({ name: data.name, author: data.author, points: data.points });
+  if (!rec) { toast('Could not save that track — storage may be full.'); return; }
+  input.value = '';
+  buildCommunityGrid();
+  toast(existed ? `Updated "${rec.name}" — you already had this track.` : `Added "${rec.name}" to community tracks.`);
 }
 
 // ------------------------------------------------------------ leaderboard modal
@@ -196,7 +253,9 @@ let lbTrackId = null;
 async function openLeaderboard(trackId) {
   lbTrackId = trackId;
   const def = TRACKS.find(t => t.id === trackId);
-  $('lb-title').textContent = def ? `${def.name} — TOP 10` : 'TOP 10';
+  const rec = def ? null : getTrack(trackId);
+  const label = def ? def.name : rec ? rec.name : 'Community Track';
+  $('lb-title').textContent = `${label} — TOP 10`;
   const list = $('lb-list');
   list.innerHTML = '<div class="lb-empty">Loading…</div>';
   show($('leaderboard'));
@@ -294,9 +353,9 @@ async function doSubmit() {
 
 // ------------------------------------------------------------ editor wiring
 
-const editor = new TrackEditor((points) => {
+const editor = new TrackEditor((points, name) => {
   // test drive — keep the editor open behind us so ESC returns to it
-  const def = customDef(points);
+  const def = customDef(points, { name: name || 'Test Track' });
   if (!def) {
     $('editor-hint').textContent = 'That layout is too small to drive — spread the corners out and try again.';
     return;
@@ -317,11 +376,28 @@ editor.onExit = () => { editing = false; toMenu(); };
 
 // ------------------------------------------------------------ buttons & keys
 
-$('btn-play').addEventListener('click', toTrackSelect);
+$('btn-play').addEventListener('click', () => toTrackSelect());
 $('btn-editor').addEventListener('click', () => {
   hideAllOverlays();
   show($('editor'));
+  editor.focusName();
 });
+
+// official / community tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => setTab(tab.dataset.tab));
+});
+
+$('btn-new-track').addEventListener('click', () => {
+  hideAllOverlays();
+  show($('editor'));
+  editor.reset();
+});
+$('btn-import-code').addEventListener('click', importCommunityCode);
+$('community-code').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') importCommunityCode();
+});
+
 document.querySelectorAll('[data-close]').forEach(btn => {
   btn.addEventListener('click', () => hide($(btn.dataset.close)));
 });
@@ -354,5 +430,6 @@ window.addEventListener('keydown', (e) => {
 // debug/testing hook (also handy in devtools)
 window.__game = game;
 
-// boot
+// boot: pull any pre-library custom track into the community list
+migrateLegacy();
 toMenu();

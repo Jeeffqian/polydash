@@ -43,8 +43,9 @@ console.log('menu visible:', menuVisible);
 // open track select
 await page.click('#btn-play');
 await new Promise(r => setTimeout(r, 400));
-const cards = await page.$$eval('.track-card', els => els.length);
-console.log('track cards:', cards);
+const cards = await page.$$eval('#track-grid .track-card', els => els.length);
+console.log('official track cards:', cards);
+if (cards !== 6) errors.push(`[assert] expected 6 official tracks, got ${cards}`);
 
 // start first official track
 await page.click('.track-card');
@@ -151,30 +152,87 @@ const backToEditor = await page.evaluate(() => ({
 console.log('esc from test drive →', JSON.stringify(backToEditor));
 if (!backToEditor.editor) errors.push('[assert] ESC from test drive did not return to the editor');
 
-// the saved custom track must be selectable from the track list too
-await page.evaluate(() => {
-  if (!document.getElementById('editor').classList.contains('hidden')) {
-    document.getElementById('ed-exit').click();
-  }
-});
-await new Promise(r => setTimeout(r, 400));
+// save it to the community library, then check both tabs
+await page.click('#ed-name');
+await page.type('#ed-name', 'Browser Test Loop');
+await page.click('#ed-save');
+await new Promise(r => setTimeout(r, 300));
+const saveHint = await page.$eval('#editor-hint', el => el.textContent);
+console.log('save hint:', saveHint);
+if (!/saved/i.test(saveHint)) errors.push('[assert] SAVE to community did not confirm');
+
+await page.click('#ed-exit');
+await new Promise(r => setTimeout(r, 500));
+
+// PLAY opens track select: OFFICIAL tab must list exactly the 6 built-ins
 await page.click('#btn-play');
 await new Promise(r => setTimeout(r, 400));
-const customCard = await page.evaluate(() => {
-  const cards = Array.from(document.querySelectorAll('.track-card'));
-  const last = cards[cards.length - 1];
-  last.click();
-  return last.dataset.track;
+const tabs = await page.evaluate(() => ({
+  official: document.querySelectorAll('#track-grid .track-card').length,
+  active: document.querySelector('.tab.active')?.dataset.tab,
+  communityVisible: !document.getElementById('tab-community').classList.contains('hidden'),
+}));
+console.log('tabs:', JSON.stringify(tabs));
+if (tabs.official !== 6) errors.push(`[assert] official tab has ${tabs.official} cards, expected 6`);
+if (tabs.active !== 'official') errors.push('[assert] PLAY did not open the official tab');
+if (tabs.communityVisible) errors.push('[assert] both tabs visible at once');
+
+// COMMUNITY tab must show the track saved from the editor
+await page.click('.tab[data-tab="community"]');
+await new Promise(r => setTimeout(r, 300));
+const community = await page.evaluate(() => {
+  const cards = Array.from(document.querySelectorAll('#community-grid .track-card'));
+  return {
+    count: cards.length,
+    badge: document.getElementById('community-count').textContent,
+    first: cards[0] ? { id: cards[0].dataset.track, text: cards[0].innerText.replace(/\n/g, ' | ') } : null,
+    officialHidden: document.getElementById('tab-official').classList.contains('hidden'),
+  };
 });
-await new Promise(r => setTimeout(r, 1200));
+console.log('community tab:', JSON.stringify(community));
+if (!(community.count >= 1)) errors.push('[assert] community tab did not list the saved track');
+if (!community.officialHidden) errors.push('[assert] official grid still visible on community tab');
+if (community.first && !/Browser Test Loop/.test(community.first.text)) {
+  errors.push('[assert] community card is missing the saved name');
+}
+
+// playing a community track must build a real track
+await page.click('#community-grid .track-card');
+await new Promise(r => setTimeout(r, 1500));
 const fromList = await page.evaluate(() => {
   const g = window.__game;
-  return { hasTrack: !!g.track, length: g.track ? g.track.length : 0 };
+  return { hasTrack: !!g.track, length: g.track ? g.track.length : 0, name: g.track ? g.track.name : '' };
 });
-console.log('custom track from list:', customCard, JSON.stringify(fromList));
-if (customCard.startsWith('custom') && !(fromList.length > 50)) {
-  errors.push('[assert] custom track card did not load the saved track');
-}
+console.log('community track from list:', JSON.stringify(fromList));
+if (!(fromList.length > 50)) errors.push('[assert] community track card did not load the saved track');
+
+// returning from it lands back on the community tab
+await page.keyboard.press('Escape');
+await new Promise(r => setTimeout(r, 600));
+await page.click('#btn-play');
+await new Promise(r => setTimeout(r, 400));
+const remembered = await page.$eval('.tab.active', el => el.dataset.tab);
+console.log('tab remembered after playing:', remembered);
+if (remembered !== 'community') errors.push(`[assert] track select reopened on ${remembered}, expected community`);
+
+// a share code can be imported into the community library
+const shareCode = await page.evaluate(() => {
+  const rec = JSON.parse(localStorage.getItem('polydash_community_tracks'))[0];
+  // shift the layout so it is a genuinely new track, not an update
+  return btoa(JSON.stringify({ v: 1, name: 'Imported Loop', author: 'Tester', points: rec.points.map(p => [p.x + 12, p.z - 9]) }));
+});
+await page.evaluate((code) => {
+  const input = document.getElementById('community-code');
+  input.value = code;
+  document.getElementById('btn-import-code').click();
+}, shareCode);
+await new Promise(r => setTimeout(r, 400));
+const afterImport = await page.evaluate(() => ({
+  count: document.querySelectorAll('#community-grid .track-card').length,
+  badge: document.getElementById('community-count').textContent,
+}));
+console.log('after import:', JSON.stringify(afterImport));
+if (afterImport.count !== 2) errors.push(`[assert] importing a share code left ${afterImport.count} community tracks, expected 2`);
 
 // filter errors: ignore benign ones
 const benign = [
