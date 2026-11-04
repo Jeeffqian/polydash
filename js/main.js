@@ -265,7 +265,7 @@ async function openLeaderboard(trackId) {
 
 function renderBoard(list, rows) {
   if (!cloudAvailable()) {
-    list.innerHTML = '<div class="lb-empty">Online leaderboard unavailable (offline).</div>';
+    list.innerHTML = '<div class="lb-empty">Online leaderboard is not available on this host.<br>Your best time and ghost still save locally.</div>';
     return;
   }
   if (!rows.length) {
