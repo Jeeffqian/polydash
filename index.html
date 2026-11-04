@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PolyDash — Low-Poly Racing</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏎️</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+  }
+}
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="game-canvas"></canvas>
+
+    <!-- HUD -->
+    <div id="hud" class="hidden">
+      <div id="hud-top-left">
+        <div id="hud-timer">00:00.000</div>
+        <div id="hud-splits"></div>
+      </div>
+      <div id="hud-top-right">
+        <div id="hud-track-name"></div>
+        <div id="hud-best"></div>
+      </div>
+      <div id="hud-bottom-right">
+        <div id="hud-speed"><span id="speed-value">0</span><span class="unit">km/h</span></div>
+        <div id="hud-drift-charge"><div id="drift-bar"></div></div>
+      </div>
+      <div id="hud-center" class="hidden"></div>
+      <div id="hud-controls">
+        WASD / Arrows — drive &nbsp;·&nbsp; SPACE — drift &nbsp;·&nbsp; R — restart &nbsp;·&nbsp; G — ghost &nbsp;·&nbsp; ESC — menu
+      </div>
+    </div>
+
+    <!-- Main menu -->
+    <div id="menu" class="overlay">
+      <div class="menu-box">
+        <h1 class="logo">POLY<span>DASH</span></h1>
+        <p class="tagline">low-poly drift racing</p>
+        <div class="menu-buttons">
+          <button id="btn-play" class="btn btn-primary">PLAY</button>
+          <button id="btn-editor" class="btn">TRACK EDITOR</button>
+        </div>
+        <div class="menu-footer">Inspired by low-poly time-trial racers · v1.0</div>
+      </div>
+    </div>
+
+    <!-- Track select -->
+    <div id="track-select" class="overlay hidden">
+      <div class="panel panel-wide">
+        <div class="panel-head">
+          <h2>SELECT TRACK</h2>
+          <button class="btn btn-close" data-close="track-select">✕</button>
+        </div>
+        <div id="track-grid"></div>
+      </div>
+    </div>
+
+    <!-- Leaderboard modal -->
+    <div id="leaderboard" class="overlay hidden">
+      <div class="panel">
+        <div class="panel-head">
+          <h2 id="lb-title">LEADERBOARD</h2>
+          <button class="btn btn-close" data-close="leaderboard">✕</button>
+        </div>
+        <div id="lb-list" class="lb-list"></div>
+      </div>
+    </div>
+
+    <!-- Finish dialog -->
+    <div id="finish" class="overlay hidden">
+      <div class="panel">
+        <div class="panel-head"><h2 id="finish-title">FINISH!</h2></div>
+        <div id="finish-medal" class="finish-medal"></div>
+        <div id="finish-time" class="finish-time"></div>
+        <div id="finish-details" class="finish-details"></div>
+        <div id="finish-submit" class="finish-submit">
+          <input id="player-name" maxlength="24" placeholder="Your name">
+          <button id="btn-submit-score" class="btn btn-primary">SUBMIT</button>
+        </div>
+        <div id="finish-board" class="lb-list small"></div>
+        <div class="row-btns">
+          <button id="btn-retry" class="btn btn-primary">RETRY (R)</button>
+          <button id="btn-to-menu" class="btn">TRACKS</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Track editor -->
+    <div id="editor" class="overlay hidden">
+      <div class="editor-wrap">
+        <div class="editor-toolbar">
+          <h2>TRACK EDITOR</h2>
+          <button id="ed-add" class="btn small active">ADD POINT</button>
+          <button id="ed-move" class="btn small">MOVE</button>
+          <button id="ed-del" class="btn small">DELETE</button>
+          <span class="sep"></span>
+          <button id="ed-test" class="btn small btn-primary">TEST DRIVE</button>
+          <button id="ed-export" class="btn small">EXPORT</button>
+          <button id="ed-import" class="btn small">IMPORT</button>
+          <button id="ed-clear" class="btn small">CLEAR</button>
+          <span class="sep"></span>
+          <button id="ed-exit" class="btn small">EXIT</button>
+        </div>
+        <canvas id="editor-canvas" width="960" height="560"></canvas>
+        <div class="editor-hint" id="editor-hint">Left-click to place track points (minimum 4, loop is closed automatically). Switch to MOVE to drag points, DELETE to remove one.</div>
+        <textarea id="editor-io" class="hidden" spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="hidden"></div>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

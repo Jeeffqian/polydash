@@ -1,0 +1,14 @@
+{
+  "name": "polydash",
+  "version": "1.0.0",
+  "description": "Low-poly drift racing game inspired by time-trial racers",
+  "scripts": {
+    "test": "node test/logic.test.mjs && node test/physics.test.mjs"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "puppeteer-core": "^25.16.0",
+    "three": "^0.187.0"
+  },
+  "type": "module"
+}
