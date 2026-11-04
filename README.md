@@ -54,6 +54,10 @@ npx serve .        # or: python -m http.server 8080
 
 Then open the printed URL in your browser. (Opening `index.html` directly via `file://` also works in most browsers.)
 
+## Notes on hosting
+
+The game is a static site, so it runs anywhere — including GitHub Pages. The **online leaderboard**, however, only answers the domain it was provisioned for (`polydash-game.app.workbuddy.host`) and localhost. On any other host the client is skipped and the game falls back to local best times and ghosts, with a notice in the leaderboard panel. Everything else (tracks, physics, editor, community tracks, ghost) works identically.
+
 ## Tests
 
 Headless logic + physics tests (no browser needed):
