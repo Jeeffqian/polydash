@@ -19,9 +19,11 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.15;
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 1200);
+    this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 4000);
 
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x666666, 0.9);
     this.scene.add(this.hemi);
@@ -112,11 +114,11 @@ export class Game {
     this.scene.add(this.trackGroup);
     buildSceneEnvironment(this.scene, built.theme);
 
-    this.hemi.color.set(this.theme.sky);
+    this.hemi.color.set(this.theme.skyHorizon);
     this.hemi.groundColor.set(this.theme.ground);
-    this.hemi.intensity = 0.55;
+    this.hemi.intensity = this.theme.hemiI;
     this.sun.color.set(this.theme.sun);
-    this.sun.intensity = this.theme.deco === 'neon' ? 0.9 : 1.6;
+    this.sun.intensity = this.theme.sunI;
     this.sunPos = this.theme.sunPos;
 
     this.car.placeAt(this.track.startPos, this.track.startYaw);

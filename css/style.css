@@ -74,6 +74,11 @@ html, body {
   z-index: 10;
 }
 
+#menu {
+  background: radial-gradient(ellipse at 50% 28%, rgba(42, 60, 96, .5), rgba(8, 12, 20, .94)),
+              linear-gradient(160deg, rgba(255, 90, 60, .08), transparent 45%);
+}
+
 .menu-box { text-align: center; }
 .logo {
   font-size: 84px; font-weight: 900; letter-spacing: 4px;

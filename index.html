@@ -98,9 +98,14 @@
       <div class="editor-wrap">
         <div class="editor-toolbar">
           <h2>TRACK EDITOR</h2>
-          <button id="ed-add" class="btn small active">ADD POINT</button>
+          <button id="ed-add" class="btn small active">ADD CORNER</button>
           <button id="ed-move" class="btn small">MOVE</button>
           <button id="ed-del" class="btn small">DELETE</button>
+          <button id="ed-snap" class="btn small active">SNAP</button>
+          <button id="ed-undo" class="btn small">UNDO</button>
+          <span class="sep"></span>
+          <button id="ed-zoom-in" class="btn small">ZOOM +</button>
+          <button id="ed-zoom-out" class="btn small">ZOOM −</button>
           <span class="sep"></span>
           <button id="ed-test" class="btn small btn-primary">TEST DRIVE</button>
           <button id="ed-export" class="btn small">EXPORT</button>
@@ -110,7 +115,7 @@
           <button id="ed-exit" class="btn small">EXIT</button>
         </div>
         <canvas id="editor-canvas" width="960" height="560"></canvas>
-        <div class="editor-hint" id="editor-hint">Left-click to place track points (minimum 4, loop is closed automatically). Switch to MOVE to drag points, DELETE to remove one.</div>
+        <div class="editor-hint" id="editor-hint">Click to drop corner points — the white band is the real road you will drive (loop closes automatically). SNAP aligns points to the grid.</div>
         <textarea id="editor-io" class="hidden" spellcheck="false"></textarea>
       </div>
     </div>

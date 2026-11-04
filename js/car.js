@@ -10,8 +10,8 @@ const BOOST_MAX = 62;
 const DRAG = ACCEL / (MAX_SPEED * MAX_SPEED); // balances at MAX_SPEED
 const ROLL_RESIST = 1.6;
 const GRIP = 9.5;            // lateral velocity decay when gripping
-const DRIFT_GRIP = 1.7;      // lateral decay while drifting
-const STEER_RATE = 2.4;      // rad/s at full steer
+const DRIFT_GRIP = 2.4;      // lateral decay while drifting
+const STEER_RATE = 2.6;      // rad/s at full steer
 const GRAVITY = 26;
 const WALL_MARGIN = 0.9;
 
@@ -33,58 +33,102 @@ export class Car {
   buildMesh(color) {
     const g = new THREE.Group();
 
-    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.25 });
-    const darkMat = new THREE.MeshStandardMaterial({ color: 0x1a1f2a, roughness: 0.6 });
-    const glassMat = new THREE.MeshStandardMaterial({ color: 0x9fd8ff, roughness: 0.1, metalness: 0.4 });
+    const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.32, metalness: 0.35, flatShading: true });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x141821, roughness: 0.55, metalness: 0.2, flatShading: true });
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x18232e, roughness: 0.12, metalness: 0.65 });
 
-    // main body — beveled feel via multiple boxes
-    const lower = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.55, 4.2), bodyMat);
-    lower.position.y = 0.55;
-    const nose = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.35, 1.0), bodyMat);
-    nose.position.set(0, 0.5, 2.4);
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 2.0), bodyMat);
-    cabin.position.set(0, 1.05, -0.2);
-    const windshield = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.45, 0.9), glassMat);
-    windshield.position.set(0, 1.05, 0.85);
-    windshield.rotation.x = -0.35;
-    const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.12, 0.5), darkMat);
-    spoiler.position.set(0, 1.25, -2.1);
-    const spoilerL = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.35, 0.4), darkMat);
-    spoilerL.position.set(-0.75, 1.05, -2.05);
-    const spoilerR = spoilerL.clone();
-    spoilerR.position.x = 0.75;
-    // headlights / taillights
-    const hlMat = new THREE.MeshBasicMaterial({ color: 0xfff4c0 });
-    const tlMat = new THREE.MeshBasicMaterial({ color: 0xff3030 });
-    for (const sx of [-1, 1]) {
-      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.1), hlMat);
-      hl.position.set(sx * 0.6, 0.62, 2.92);
-      const tl = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.14, 0.08), tlMat);
-      tl.position.set(sx * 0.6, 0.75, -2.13);
-      g.add(hl, tl);
+    // sculpted body: low wedge with raked nose, extruded side profile
+    const body = new THREE.Shape();
+    body.moveTo(-2.35, 0.16);   // rear bottom
+    body.lineTo(-2.44, 0.62);   // rear face (kammback)
+    body.lineTo(-2.05, 0.8);    // small rear deck
+    body.lineTo(0.7, 0.84);     // flat waistline
+    body.lineTo(2.02, 0.62);    // hood slope
+    body.lineTo(2.46, 0.46);    // nose tip
+    body.lineTo(2.4, 0.18);     // front bottom
+    body.closePath();
+    const bodyGeo = new THREE.ExtrudeGeometry(body, {
+      depth: 1.78, bevelEnabled: true, bevelThickness: 0.09, bevelSize: 0.09, bevelSegments: 2, steps: 1,
+    });
+    bodyGeo.translate(0, 0, -0.89);
+    bodyGeo.rotateY(-Math.PI / 2); // nose now points +Z (car forward)
+    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+    bodyMesh.castShadow = true;
+    g.add(bodyMesh);
+
+    // glass canopy sitting on the waistline
+    const canopy = new THREE.Shape();
+    canopy.moveTo(-1.5, 0.8);
+    canopy.lineTo(-1.05, 1.24);
+    canopy.lineTo(0.35, 1.28);
+    canopy.lineTo(1.0, 0.8);
+    canopy.closePath();
+    const canopyGeo = new THREE.ExtrudeGeometry(canopy, {
+      depth: 1.34, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.06, bevelSegments: 1, steps: 1,
+    });
+    canopyGeo.translate(0, 0, -0.67);
+    canopyGeo.rotateY(-Math.PI / 2);
+    const canopyMesh = new THREE.Mesh(canopyGeo, glassMat);
+    canopyMesh.castShadow = true;
+    g.add(canopyMesh);
+
+    // front splitter + side skirts
+    const splitter = new THREE.Mesh(new THREE.BoxGeometry(1.95, 0.1, 0.5), darkMat);
+    splitter.position.set(0, 0.16, 2.42);
+    const skirtL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 2.6), darkMat);
+    skirtL.position.set(-0.97, 0.2, 0);
+    const skirtR = skirtL.clone();
+    skirtR.position.x = 0.97;
+    g.add(splitter, skirtL, skirtR);
+
+    // rear wing on struts
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.09, 0.5), darkMat);
+    wing.position.set(0, 1.18, -2.2);
+    wing.rotation.x = 0.12;
+    for (const sx of [-0.72, 0.72]) {
+      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.42, 0.3), darkMat);
+      strut.position.set(sx, 0.95, -2.18);
+      g.add(strut);
     }
-    g.add(lower, nose, cabin, windshield, spoiler, spoilerL, spoilerR);
+    g.add(wing);
+
+    // headlights + taillight bar
+    const hlMat = new THREE.MeshBasicMaterial({ color: 0xfff4c0 });
+    const tlMat = new THREE.MeshBasicMaterial({ color: 0xff2828 });
+    for (const sx of [-1, 1]) {
+      const hl = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.12, 0.08), hlMat);
+      hl.position.set(sx * 0.62, 0.44, 2.52);
+      g.add(hl);
+    }
+    const tl = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.1, 0.06), tlMat);
+    tl.position.set(0, 0.72, -2.52);
+    g.add(tl);
+    // exhausts
+    for (const sx of [-0.45, 0.45]) {
+      const ex = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.16, 8), darkMat);
+      ex.rotation.x = Math.PI / 2;
+      ex.position.set(sx, 0.28, -2.55);
+      g.add(ex);
+    }
 
     g.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
 
     // wheels
-    const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.34, 14);
+    const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.36, 16);
     wheelGeo.rotateZ(Math.PI / 2);
-    const rimGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.36, 8);
+    const rimGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.38, 8);
     rimGeo.rotateZ(Math.PI / 2);
-    const tireMat = new THREE.MeshStandardMaterial({ color: 0x15181f, roughness: 0.9 });
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0xb8c0cc, roughness: 0.3, metalness: 0.7 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x111318, roughness: 0.9, flatShading: true });
+    const rimMat = new THREE.MeshStandardMaterial({ color: 0xc8d0da, roughness: 0.25, metalness: 0.85, flatShading: true });
     this.wheels = [];
     const wheelPos = [
-      [-0.95, 0.42, 1.45], [0.95, 0.42, 1.45],
-      [-0.95, 0.42, -1.45], [0.95, 0.42, -1.45],
+      [-0.96, 0.42, 1.52], [0.96, 0.42, 1.52],
+      [-0.96, 0.42, -1.5], [0.96, 0.42, -1.5],
     ];
     for (const [x, y, z] of wheelPos) {
       const hub = new THREE.Group();
       hub.position.set(x, y, z);
-      const tire = new THREE.Mesh(wheelGeo, tireMat);
-      const rim = new THREE.Mesh(rimGeo, rimMat);
-      hub.add(tire, rim);
+      hub.add(new THREE.Mesh(wheelGeo, tireMat), new THREE.Mesh(rimGeo, rimMat));
       g.add(hub);
       this.wheels.push(hub);
     }
@@ -154,10 +198,10 @@ export class Car {
     // ---- lateral grip
     const grip = this.drifting ? DRIFT_GRIP : GRIP;
     const decay = Math.exp(-grip * dt);
-    // cornering injects lateral velocity (car turns, velocity lags behind)
+    // cornering injects lateral velocity (car turns, momentum lags behind)
     const latInject = yawRate * this.vf * dt;
-    this.vl = this.vl * decay + latInject * 0.55;
-    const vlCap = 26;
+    this.vl = this.vl * decay + latInject * 0.7;
+    const vlCap = 20;
     this.vl = Math.max(-vlCap, Math.min(vlCap, this.vl));
 
     if (this.drifting) {
@@ -203,6 +247,20 @@ export class Car {
         this.vf = (vt * (f.x * tx + f.z * tz)) * 0.97;
         this.vl = (vt * (r.x * tx + r.z * tz)) * 0.97;
       }
+      this.wallTime = (this.wallTime || 0) + dt;
+      // stuck against the wall at low speed? gently recover onto the track
+      if (this.wallTime > 0.8 && Math.abs(this.vf) < 6) {
+        const tangentYaw = Math.atan2(info.tangent.x, info.tangent.z);
+        const heading = f.x * info.tangent.x + f.z * info.tangent.z >= 0 ? tangentYaw : tangentYaw + Math.PI;
+        let dYaw = heading - this.yaw;
+        while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+        while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+        this.yaw += dYaw * Math.min(1, dt * 2.5);
+        this.pos.addScaledVector(info.right, -sign * dt * 3);
+        this.vf += dt * 4;
+      }
+    } else {
+      this.wallTime = 0;
     }
 
     // ---- visuals
