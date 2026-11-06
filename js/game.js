@@ -258,7 +258,7 @@ export class Game {
         steps++;
       }
       const info = this.track.lookup(this.car.pos.x, this.car.pos.z);
-      this.timer.update(info.s, this.raceTime);
+      this.timer.update(info.s, this.raceTime, Math.abs(this.car.vf));
       this.recorder.frame_tick(this.raceTime, this.car);
       this.updateGhost();
       this.updateHUD();

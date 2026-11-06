@@ -38,7 +38,12 @@ page.on('requestfailed', (req) => {
 });
 
 await page.goto(URL_, { waitUntil: 'networkidle2', timeout: 30000 });
-await new Promise(r => setTimeout(r, 2500));
+// wait for the Rapier wasm boot splash to clear before touching the menu
+await page.waitForFunction(
+  () => { const b = document.getElementById('boot'); return !b || b.classList.contains('fading') || b.classList.contains('hidden'); },
+  { timeout: 60000 },
+);
+await new Promise(r => setTimeout(r, 600));
 
 // menu visible?
 const menuVisible = await page.$eval('#menu', el => !el.classList.contains('hidden'));

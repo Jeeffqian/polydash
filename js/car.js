@@ -15,17 +15,19 @@ import { getRapier, initPhysics } from './physics.js';
 
 const MASS = 900;                 // kg
 const ACCEL = 24;                 // m/s^2 at full throttle (force = MASS*ACCEL)
-const BRAKE_DECEL = 34;
+const BRAKE_DECEL = 28;
 const REVERSE_ACCEL = 10;
 const MAX_SPEED = 53;             // m/s (~190 km/h)
 const BOOST_MAX = 64;
 const DRAG = ACCEL / (MAX_SPEED * MAX_SPEED); // balances at MAX_SPEED
 const ROLL_RESIST = 1.6;
 const GRAVITY = 26;
-const STEER_RATE = 2.6;           // target yaw rate, rad/s
+const STEER_RATE = 2.15;          // target yaw rate, rad/s
 const WHEELBASE = 3.02;
-const LAT_ACC_LIMIT = 26;         // m/s^2, caps the yaw rate at speed
+const LAT_ACC_LIMIT = 21;         // m/s^2, caps the yaw rate at speed
 const MAX_STEER = 0.62;           // rad, hard clamp on the wheel angle
+const STEER_IN_RATE = 7.5;        // how fast the wheel angle follows the key
+const STEER_OUT_RATE = 11;        // ... and how fast it recentres
 
 // suspension geometry (chassis-local, origin at ground level under the car)
 const WHEEL_RADIUS = 0.42;
@@ -58,6 +60,7 @@ export class Car {
     this.grounded = true;
     this.driftCharge = 0;
     this.drifting = false;
+    this.steerIn = 0;      // smoothed steering input (-1..1)
     this.steerVis = 0;
     this.wheelRoll = 0;
 
@@ -306,6 +309,7 @@ export class Car {
     this.vf = 0; this.vl = 0; this.vy = 0;
     this.driftCharge = 0;
     this.drifting = false;
+    this.steerIn = 0;
     this.boostTimer = 0;
     this.wallTime = 0;
     this.flipTime = 0;
@@ -356,10 +360,17 @@ export class Car {
 
     // ---- steering: turn the desired yaw rate into a wheel angle, so the car
     //      keeps the old arcade turn-in instead of spinning once it is quick
+    // ---- steering: ramp the digital key into a wheel angle. Without this a
+    //      single tap is full lock and the car darts into the barrier.
+    const steerTarget = Math.max(-1, Math.min(1, input.steer || 0));
+    const ramp = steerTarget === 0 ? STEER_OUT_RATE : STEER_IN_RATE;
+    this.steerIn += (steerTarget - this.steerIn) * Math.min(1, dt * ramp);
+    const steer = this.steerIn;
+
     const speedFactor = Math.min(speed / 14, 1) * (speed > 0.5 ? 1 : 0);
     const steerAuth = 1 - Math.min(Math.max(this.vf, 0) / 90, 0.45);
-    let yawRate = input.steer * STEER_RATE * steerAuth * speedFactor;
-    if (this.drifting) yawRate *= 1.35;
+    let yawRate = steer * STEER_RATE * steerAuth * speedFactor;
+    if (this.drifting) yawRate *= 1.15;
     if (this.vf < -0.5) yawRate = -yawRate;
     // don't let the nose pivot faster than the tyres could ever hold: this is
     // what stops full lock at 80 km/h from spinning the car on the spot
@@ -367,7 +378,7 @@ export class Car {
     yawRate = Math.max(-maxYaw, Math.min(maxYaw, yawRate));
     let steerAngle = Math.atan((yawRate * WHEELBASE) / Math.max(Math.abs(this.vf), 4));
     steerAngle = Math.max(-MAX_STEER, Math.min(MAX_STEER, steerAngle));
-    this.steerVis += (input.steer - this.steerVis) * Math.min(1, dt * 10);
+    this.steerVis += (steer - this.steerVis) * Math.min(1, dt * 14);
 
     const gripFront = this.drifting ? DRIFT_FRONT : GRIP_FRONT;
     const gripRear = this.drifting ? DRIFT_REAR : GRIP_REAR;
@@ -375,7 +386,7 @@ export class Car {
     for (let i = 0; i < 4; i++) {
       const front = i < 2;
       veh.setWheelFrictionSlip(i, front ? gripFront : gripRear);
-      veh.setWheelSideFrictionStiffness(i, this.drifting ? (front ? 0.55 : 0.18) : 1.0);
+      veh.setWheelSideFrictionStiffness(i, this.drifting ? (front ? 0.62 : 0.26) : 1.15);
       veh.setWheelSteering(i, front ? steerAngle : 0);
       veh.setWheelBrake(i, 0);
       veh.setWheelEngineForce(i, 0);
@@ -412,7 +423,7 @@ export class Car {
 
     // ---- drift assist: a little yaw torque so the tail actually steps out
     if (this.drifting && Math.abs(this.vf) > 4) {
-      const assist = 1.9 * MASS * input.steer * Math.min(1, speed / 20);
+      const assist = 1.6 * MASS * steer * Math.min(1, speed / 20);
       body.addTorque({ x: 0, y: assist, z: 0 }, true);
     }
 
@@ -424,10 +435,26 @@ export class Car {
     const I_Y = 1700;                       // kg m^2, box-ish estimate
     // while drifting the tail is supposed to break away, so only nudge the
     // heading instead of rail-tracking it
-    const servoGain = this.drifting ? 1.4 : 7;
-    const maxT = I_Y * (this.drifting ? 3 : 11);
+    const servoGain = this.drifting ? 1.2 : 5.2;
+    const maxT = I_Y * (this.drifting ? 2.6 : 8.5);
     const servoT = Math.max(-maxT, Math.min(maxT, err * I_Y * servoGain));
     body.addTorque({ x: 0, y: servoT, z: 0 }, true);
+
+    // ---- stability assist: a keyboard player who holds lock into a tight
+    //      corner would otherwise spin 180° and park against the barrier. This
+    //      torque bleeds off excessive slip angle (nose vs. actual travel).
+    //      It is deliberately weak while drifting so slides still happen.
+    if (grounded && speed > 5) {
+      const slip = Math.atan2(this.vl, Math.abs(this.vf) + 1);   // rad
+      const limit = this.drifting ? 0.75 : 0.30;                 // ~43° / ~17°
+      const over = Math.abs(slip) - limit;
+      if (over > 0) {
+        const gain = this.drifting ? 2.0 : 4.5;
+        const tq = -Math.sign(slip) * Math.min(over, 1.0) * I_Y * gain
+          * Math.min(1, speed / 18);
+        body.addTorque({ x: 0, y: tq, z: 0 }, true);
+      }
+    }
 
     // ---- step: controller casts the rays and pushes the chassis, then the
     //      solver integrates one fixed step
@@ -474,9 +501,11 @@ export class Car {
 
     // anything that keeps the car from making progress under power: a barrier
     // it is pinned against, a bad angle after a crash, a wheel off the kerb
-    const pinnedWall = Math.abs(info.lateral) > track.halfW - 1.6;
-    const creeping = input.throttle > 0 && Math.abs(this.vf) < 2.5;
-    if ((pinnedWall && Math.abs(this.vf) < 7) || creeping) this.wallTime += dt;
+    // only a genuinely stuck car gets rescued — otherwise the push turns the
+    // barrier into a rail that is faster than actually driving
+    const pinnedWall = Math.abs(info.lateral) > track.halfW - 1.2;
+    const creeping = input.throttle > 0 && Math.abs(this.vf) < 1.5;
+    if ((pinnedWall && Math.abs(this.vf) < 3) || creeping) this.wallTime += dt;
     else this.wallTime = 0;
 
     // on the roof: stand it back up, keeping the heading
@@ -486,18 +515,20 @@ export class Car {
       return;
     }
 
-    // stuck: aim along the track and push back into it
-    if (this.wallTime > 0.9) {
+    // stuck: aim *down the track* and push back into it. It used to keep the
+    // current heading, which meant a car that had spun 180° was politely
+    // nudged further backwards — exactly the "cannot move any more" bug.
+    if (this.wallTime > 1.2) {
       const sign = Math.sign(info.lateral) || 1;
       const tangentYaw = Math.atan2(info.tangent.x, info.tangent.z);
-      const heading = this.forward().dot(info.tangent) >= 0 ? tangentYaw : tangentYaw + Math.PI;
+      const heading = tangentYaw;
       let dYaw = heading - this.yaw;
       while (dYaw > Math.PI) dYaw -= Math.PI * 2;
       while (dYaw < -Math.PI) dYaw += Math.PI * 2;
-      this.yaw += dYaw * Math.min(1, dt * 3.5);
+      this.yaw += dYaw * Math.min(1, dt * 4.5);
       const rq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
       this.body.setRotation({ x: rq.x, y: rq.y, z: rq.z, w: rq.w }, true);
-      const push = 22000 * dt;
+      const push = 9000 * dt;
       this.body.applyImpulse(
         {
           x: -info.right.x * sign * push + info.tangent.x * push,

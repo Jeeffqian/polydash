@@ -20,8 +20,14 @@ let editing = false;
 let escHandled = false;
 
 // Rapier ships as wasm: load the backend before the Game (and its car body)
-// gets constructed.
-await initPhysics();
+// gets constructed. The boot splash stays up until that is done, so nobody can
+// click a button that has no listener yet (or stare at a frozen menu).
+try {
+  await initPhysics();
+} catch (err) {
+  $('boot-text').textContent = 'physics engine failed to load — check your connection and reload';
+  throw err;
+}
 
 const game = new Game($('game-canvas'), {
   onEscape: () => {
@@ -31,6 +37,12 @@ const game = new Game($('game-canvas'), {
   },
   onFinish: (result) => showFinish(result),
 });
+
+const boot = $('boot');
+if (boot) {
+  boot.classList.add('fading');
+  setTimeout(() => boot.classList.add('hidden'), 260);
+}
 
 // ------------------------------------------------------------ navigation
 
@@ -491,7 +503,28 @@ window.__game = game;
 
 // boot: pull any pre-library custom track into the community list
 migrateLegacy();
+wipeLegacyTimes();
 toMenu();
+
+/**
+ * The car was rebuilt on Rapier (and lap validation was rewritten), so every
+ * time recorded before that is not comparable. Clear local bests and ghosts
+ * once, guarded by a version key so it never runs twice.
+ */
+function wipeLegacyTimes() {
+  const KEY = 'polydash_times_version';
+  const VERSION = '2';
+  try {
+    if (localStorage.getItem(KEY) === VERSION) return;
+    const doomed = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('polydash_best_') || k.startsWith('polydash_ghost_'))) doomed.push(k);
+    }
+    doomed.forEach(k => localStorage.removeItem(k));
+    localStorage.setItem(KEY, VERSION);
+  } catch (e) { /* private mode — nothing to clear */ }
+}
 
 // boot: share this device's tracks and pull everyone else's (no-op offline)
 if (cloudAvailable()) {

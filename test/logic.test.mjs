@@ -51,6 +51,41 @@ for (const def of TRACKS) {
   check('timer: splits reset after lap', timer.splits.length === 0);
 }
 
+// ---- Timer: a lap must be driven forward, all the way round
+{
+  // 1) drive to 80% then reverse back over the start line: no lap
+  const timer = new Timer();
+  let laps = 0;
+  timer.lapDone = () => laps++;
+  timer.start(0);
+  const step = 0.8 / 100;
+  let t = 0;
+  for (let i = 1; i <= 100; i++) { timer.update(step * i, t += 100, 20); }
+  for (let i = 99; i >= 0; i--) { timer.update(step * i, t += 100, 20); }
+  check('timer: reversing over the line does not finish', laps === 0, `laps=${laps}`);
+  check('timer: reversing does not lose checkpoints', timer.splits.length === 3, `cps=${timer.splits.length}`);
+
+  // 2) parked on the start line jittering across the seam: no lap
+  const idle = new Timer();
+  let idleLaps = 0, idleCps = 0;
+  idle.lapDone = () => idleLaps++;
+  idle.cpHit = () => idleCps++;
+  idle.start(0);
+  for (let i = 0; i < 600; i++) {
+    idle.update(i % 2 ? 0.999 : 0.001, i * 16, 0);
+  }
+  check('timer: parked jitter cannot finish a lap', idleLaps === 0, `laps=${idleLaps}`);
+  check('timer: parked jitter cannot collect checkpoints', idleCps === 0, `cps=${idleCps}`);
+
+  // 3) a forward full lap still finishes
+  const good = new Timer();
+  let goodLaps = 0;
+  good.lapDone = () => goodLaps++;
+  good.start(0);
+  for (let i = 1; i <= 200; i++) good.update((i % 200) / 200, i * 60, 25);
+  check('timer: a real forward lap still counts', goodLaps === 1, `laps=${goodLaps}`);
+}
+
 // ---- Ghost record & replay
 {
   // stub localStorage

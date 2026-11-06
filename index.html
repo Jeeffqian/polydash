@@ -21,6 +21,14 @@
   <div id="app">
     <canvas id="game-canvas"></canvas>
 
+    <!-- Boot: Rapier is a wasm module, so the menu is dead until it is ready -->
+    <div id="boot" class="boot-screen">
+      <div class="boot-box">
+        <div class="boot-spinner"></div>
+        <p id="boot-text">loading physics engine…</p>
+      </div>
+    </div>
+
     <!-- HUD -->
     <div id="hud" class="hidden">
       <div id="hud-top-left">
