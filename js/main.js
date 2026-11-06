@@ -9,6 +9,7 @@ import {
   decodeShare, migrateLegacy, fetchCloudTracks, pushLocalTracks,
 } from './community.js';
 import { formatTime, show, hide, toast, getBest, setBest, medalFor, MEDAL_ICON, getPlayerName, setPlayerName } from './ui.js';
+import { initPhysics } from './physics.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -17,6 +18,10 @@ let lastDef = null;
 let editing = false;
 // set when the in-race ESC handler already dealt with this keypress
 let escHandled = false;
+
+// Rapier ships as wasm: load the backend before the Game (and its car body)
+// gets constructed.
+await initPhysics();
 
 const game = new Game($('game-canvas'), {
   onEscape: () => {

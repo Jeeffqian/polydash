@@ -1,8 +1,11 @@
 // Physics integration test: drive a full lap headlessly with a simple AI driver.
 import * as THREE from 'three';
-import { Car } from '../js/car.js';
+import { Car, initPhysics } from '../js/car.js';
 import { TrackData } from '../js/tracks.js';
 import { TRACKS } from '../js/tracks.js';
+
+// Rapier is a wasm module — bring the backend up before building any car body.
+await initPhysics();
 
 let failures = 0;
 function check(name, cond, extra = '') {

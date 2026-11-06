@@ -48,13 +48,16 @@ export class Timer {
       }
     }
 
-    // lap completes when wrapping from ~1 back to ~0 moving forward
+    // lap completes when wrapping from ~1 back to ~0 moving forward. A lap only
+    // counts if every checkpoint was collected: sitting on the start line and
+    // jittering across the seam must not "finish" the race in zero seconds.
     if (crossed(this.prevS, s, 0) && this.prevS > 0.5) {
       const lapTime = nowMs - this.startMs;
-      const splits = this.splits.slice();
+      const complete = this.splits.length >= CP_FRACTIONS.length && lapTime > 3000;
       this.startMs = nowMs;
+      const splits = this.splits.slice();
       this.splits = [];
-      if (this.lapDone) this.lapDone(lapTime, splits);
+      if (complete && this.lapDone) this.lapDone(lapTime, splits);
     }
 
     this.prevS = s;

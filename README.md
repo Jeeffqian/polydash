@@ -1,6 +1,6 @@
 # PolyDash 🏎️
 
-A low-poly, time-trial drift racing game that runs in your browser. Built with Three.js — no build step required.
+A low-poly, time-trial drift racing game that runs in your browser. Built with Three.js and the Rapier physics engine — no build step required.
 
 ![gameplay](preview.png)
 
@@ -75,7 +75,7 @@ The physics suite drives a full lap on every official track with a simple AI and
 ## Tech notes
 
 - **Rendering**: Three.js (ES module via CDN import map), PCF soft shadows, per-theme fog & lighting.
-- **Physics**: custom arcade model — forward/lateral velocity decomposition, grip-based lateral decay, drift charge → boost, gravity + terrain-following with crest launches, wall projection with speed penalty.
+- **Physics**: a real rigid-body simulation on **Rapier** (`@dimforge/rapier3d-compat`). The chassis is a dynamic body riding on four ray-cast suspension wheels; the road and both barriers are trimesh colliders built from the same spline data as the visuals, so what you see is what you hit. On top of that sits a thin arcade layer: a yaw-rate servo for snappy steering (capped by a lateral-grip limit), rear-wheel side-friction drop for drifting, drift charge → boost, aerodynamic drag and auto-recovery if you get pinned, flipped or fall off.
 - **Tracks**: closed Catmull-Rom splines sampled into road/curb ribbons, instanced barriers, procedurally scattered theme decorations.
 - **Backend**: WorkBuddy Cloud database (`leaderboard` table: `track_id`, `player_name`, `time_ms`) with public read / validated insert policies.
 - **Ghost data**: stored in `localStorage` at ~30 Hz, interpolated on playback.

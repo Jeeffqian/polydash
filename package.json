@@ -10,5 +10,8 @@
     "puppeteer-core": "^25.16.0",
     "three": "^0.187.0"
   },
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.14.0"
+  }
 }

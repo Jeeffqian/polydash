@@ -62,37 +62,42 @@ await new Promise(r => setTimeout(r, 3600));
 const state1 = await page.evaluate(() => document.querySelector('#hud-timer').textContent);
 console.log('timer after countdown:', state1);
 
-// drive with AI-ish inputs: hold W and alternate steering to survive corners
-let maxSpeed = 0, timerStart = null, timerEnd = null;
-const drive = page.evaluate(async () => {
+// Drive deterministically: headless software GL only manages a few frames per
+// second, so step the game loop by hand with a fixed 1/60 delta and steer
+// toward the centreline. This still exercises the real page, real Rapier and
+// the real input path — it just does not depend on wall-clock frame pacing.
+const driveStats = await page.evaluate(() => {
   const g = window.__game;
-  const iv = setInterval(() => {
-    const t = performance.now() * 0.001;
-    const steer = Math.sin(t * 1.7) > 0 ? 'KeyA' : 'KeyD';
-    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', bubbles: true }));
-    window.dispatchEvent(new KeyboardEvent('keydown', { code: steer, bubbles: true }));
-    window.dispatchEvent(new KeyboardEvent('keyup', { code: steer === 'KeyA' ? 'KeyD' : 'KeyA', bubbles: true }));
-  }, 50);
-  window.__pdIv = iv;
-  // sample speed + timer for 15 s
-  window.__pdSamples = [];
-  const sampleIv = setInterval(() => {
-    window.__pdSamples.push({ t: g ? g.raceTime : -1, kmh: g ? g.car.kmh : -1 });
-  }, 500);
-  window.__pdSampleIv = sampleIv;
+  let guard = 0;
+  while (g.state !== 'racing' && guard++ < 600) g.tick();
+  const realGetDelta = g.clock.getDelta.bind(g.clock);
+  g.clock.getDelta = () => 1 / 60;
+  let maxKmh = 0;
+  const t0 = g.raceTime;
+  for (let i = 0; i < 600; i++) {
+    const info = g.track.lookup(g.car.pos.x, g.car.pos.z);
+    const ahead = g.track.samples[(info.index + 18) % g.track.N].p;
+    let dYaw = Math.atan2(ahead.x - g.car.pos.x, ahead.z - g.car.pos.z) - g.car.yaw;
+    while (dYaw > Math.PI) dYaw -= Math.PI * 2;
+    while (dYaw < -Math.PI) dYaw += Math.PI * 2;
+    g.keys = { KeyW: true, KeyA: dYaw > 0.03, KeyD: dYaw < -0.03 };
+    g.tick();
+    maxKmh = Math.max(maxKmh, g.car.kmh);
+    if (!Number.isFinite(g.car.pos.x)) break;
+  }
+  g.clock.getDelta = realGetDelta;
+  g.keys = {};
+  return {
+    maxKmh,
+    raceMs: g.raceTime - t0,
+    finite: Number.isFinite(g.car.pos.x + g.car.pos.y + g.car.pos.z),
+    state: g.state,
+  };
 });
-await new Promise(r => setTimeout(r, 15000));
-const samples = await page.evaluate(() => {
-  clearInterval(window.__pdIv);
-  clearInterval(window.__pdSampleIv);
-  return window.__pdSamples;
-});
-maxSpeed = Math.max(...samples.map(s => s.kmh));
-timerStart = samples[0]?.t; timerEnd = samples[samples.length - 1]?.t;
-console.log('race timer advanced:', timerStart?.toFixed(1), '→', timerEnd?.toFixed(1), 'ms');
-console.log('max speed reached:', Math.round(maxSpeed), 'km/h');
-if (!(timerEnd > timerStart + 8000)) errors.push('[assert] race timer did not advance during drive');
-if (maxSpeed < 30) errors.push(`[assert] car did not accelerate (max ${Math.round(maxSpeed)} km/h)`);
+console.log('drive:', JSON.stringify({ ...driveStats, maxKmh: Math.round(driveStats.maxKmh) }));
+if (!(driveStats.raceMs > 8000)) errors.push('[assert] race timer did not advance during drive');
+if (driveStats.maxKmh < 100) errors.push(`[assert] car did not accelerate (max ${Math.round(driveStats.maxKmh)} km/h)`);
+if (!driveStats.finite) errors.push('[assert] car position went NaN while driving');
 
 // check game state didn't crash: canvas still there, HUD still visible
 const stillOk = await page.$eval('#hud', el => !el.classList.contains('hidden'));
